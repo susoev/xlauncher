@@ -36,6 +36,18 @@ def setup_logging() -> None:
         logging.getLogger().addHandler(logging.StreamHandler())
 
 
+def thread_stacks() -> str:
+    """Где сейчас стоит каждый поток — для разбора зависаний окна."""
+    import traceback
+
+    names = {t.ident: t.name for t in threading.enumerate()}
+    out = []
+    for ident, frame in sys._current_frames().items():
+        out.append(f"--- поток {names.get(ident, ident)}")
+        out.extend(line.rstrip() for line in traceback.format_stack(frame)[-8:])
+    return "\n".join(out)
+
+
 def pick_port(preferred: int = DEFAULT_PORT) -> int:
     for port in (preferred, 0):
         with socket.socket() as s:
@@ -130,6 +142,7 @@ def main() -> int:
         while not restart.is_set():
             if f.exists():
                 f.unlink(missing_ok=True)
+                log.info("повторный запуск xlauncher.exe — показываю окно")
                 w = window_ref.get("w")
                 try:
                     if w is not None:
@@ -154,7 +167,8 @@ def main() -> int:
             gap = time.time() - last
             if gap > 60 and not silent:
                 silent = True
-                log.warning("окно не откликается %.0f с — интерфейс завис или окно свёрнуто", gap)
+                log.warning("окно не откликается %.0f с — интерфейс завис или окно свёрнуто; стеки потоков:\n%s",
+                            gap, thread_stacks())
             elif gap < 30 and silent:
                 silent = False
                 log.info("окно снова откликается")
