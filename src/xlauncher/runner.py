@@ -20,7 +20,7 @@ import sys
 import time
 
 from . import __version__, paths, settings
-from .core import engine, iphistory, portability, profiles, runstate
+from .core import engine, iphistory, portability, prefs, profiles, runstate
 from .core.proxy import Forwarder, ProxyError, external_ip, parse_proxy
 
 log = logging.getLogger("xlauncher.runner")
@@ -39,15 +39,17 @@ def _close_browser(proc: subprocess.Popen) -> None:
     if proc.poll() is not None:
         return
     if sys.platform == "win32":
-        subprocess.run(["taskkill", "/PID", str(proc.pid), "/T"], capture_output=True,
-                       creationflags=subprocess.CREATE_NO_WINDOW)
+        r = subprocess.run(["taskkill", "/PID", str(proc.pid), "/T"], capture_output=True, timeout=20,
+                           creationflags=subprocess.CREATE_NO_WINDOW)
+        log.info("taskkill: код %s", r.returncode)
     else:
         proc.terminate()
     try:
         proc.wait(15)
     except subprocess.TimeoutExpired:
+        log.warning("браузер не закрылся за 15 с — завершаю принудительно")
         if sys.platform == "win32":
-            subprocess.run(["taskkill", "/PID", str(proc.pid), "/T", "/F"], capture_output=True,
+            subprocess.run(["taskkill", "/PID", str(proc.pid), "/T", "/F"], capture_output=True, timeout=20,
                            creationflags=subprocess.CREATE_NO_WINDOW)
         proc.kill()
         proc.wait(5)
@@ -100,6 +102,7 @@ async def run(pid: str, confirm_country: bool) -> int:
         data_dir = p.dir / "data"
         data_dir.mkdir(exist_ok=True)
         portability.clear_locks(data_dir)
+        prefs.apply(data_dir)
         key_state = portability.restore_key(p.dir) if sys.platform == "win32" else "skipped"
         if key_state == "no-backup":
             log.warning("ключ кук не расшифровывается, резервной копии нет — сайты попросят войти заново")
@@ -132,8 +135,14 @@ async def run(pid: str, confirm_country: bool) -> int:
             if runstate.stop_file(pid).exists():
                 runstate.stop_file(pid).unlink(missing_ok=True)
                 state(status="stopping")
-                stop_reason = "остановлен из лаунчера"
-                await asyncio.to_thread(_close_browser, proc)
+                log.info("профиль %s: получена команда остановки", p.slug)
+                t0 = time.monotonic()
+                closing = asyncio.create_task(asyncio.to_thread(_close_browser, proc))
+                while not closing.done():  # пока закрываем — продолжаем сообщать, что живы
+                    await asyncio.wait({closing}, timeout=runstate.HEARTBEAT_S)
+                    state()
+                await closing
+                stop_reason = f"остановлен из лаунчера (браузер закрылся за {time.monotonic() - t0:.0f} с)"
                 break
             if not key_saved and sys.platform == "win32":
                 key_saved = (p.dir / portability.KEY_FILE).exists() or portability.save_key(p.dir)

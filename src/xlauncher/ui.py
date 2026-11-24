@@ -44,6 +44,7 @@ INDEX_HTML = r"""<!doctype html>
   <button class="pri" onclick="openForm()">+ Новый профиль</button>
 </header>
 <main>
+  <div id="conn" class="banner err" style="display:none"></div>
   <div id="banners"></div>
   <div id="list"></div>
 </main>
@@ -69,7 +70,7 @@ INDEX_HTML = r"""<!doctype html>
 const $ = id => document.getElementById(id);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 async function api(method, url, body) {
-  const r = await fetch(url, {method, headers: {'Content-Type': 'application/json'}, body: body ? JSON.stringify(body) : undefined});
+  const r = await fetch(url, {method, cache: 'no-store', headers: {'Content-Type': 'application/json'}, body: body ? JSON.stringify(body) : undefined});
   const data = await r.json().catch(() => ({}));
   if (!r.ok) throw new Error(data.error || data.detail || ('HTTP ' + r.status));
   return data;
@@ -139,8 +140,14 @@ async function load() {
     const groups = {};
     for (const p of l.profiles) (groups[p.group || 'Без группы'] ||= []).push(p);
     $('list').innerHTML = Object.keys(groups).sort().map(g => `<h2>${esc(g)}</h2>` + groups[g].map(rowHtml).join('')).join('');
-  } catch (e) { console.error(e); }
+    lastOk = Date.now(); $('conn').style.display = 'none';
+  } catch (e) {
+    console.error(e);
+    $('conn').style.display = 'block';
+    $('conn').textContent = 'Нет связи с лаунчером (' + e.message + '). Данные на экране могут быть устаревшими.';
+  }
 }
+let lastOk = 0;
 
 async function act(id, what, body) {
   try { const r = await api('POST', `/api/profiles/${id}/${what}`, body || {}); if (r.ok === false && r.error) alert(r.error); }
@@ -211,5 +218,7 @@ async function saveForm() {
   $('f_save').disabled = false; load();
 }
 load(); setInterval(load, 2000);
+window.addEventListener('focus', load);
+document.addEventListener('visibilitychange', () => { if (!document.hidden) load(); });
 </script></body></html>
 """

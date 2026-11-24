@@ -141,3 +141,20 @@ def test_dead_runner_reported_as_crashed(xl_root):
     runstate.write("X", status="running", runner_pid=999999)
     assert runstate.read("X")["status"] == "crashed"
     assert not runstate.is_active("X")
+
+
+def test_geolocation_blocked_before_launch(fake_chrome, fake_net):
+    p = profiles.create("GeoBlock", proxy="127.0.0.1:1:u:p")
+    pref = p.dir / "data" / "Default" / "Preferences"
+    pref.parent.mkdir(parents=True)
+    pref.write_text(json.dumps({"profile": {"content_settings": {"exceptions": {
+        "geolocation": {"https://x.com,*": {"setting": 1}}}}}, "keep": 1}))
+    t, box = _run_in_thread(p.id)
+    assert _wait(fake_chrome.exists)
+    data = json.loads(pref.read_text())
+    assert data["profile"]["default_content_setting_values"]["geolocation"] == 2
+    assert data["profile"]["content_settings"]["exceptions"]["geolocation"] == {}
+    assert data["keep"] == 1
+    runstate.request_stop(p.id)
+    t.join(25)
+    assert "закрылся за" in (p.dir / "launch.log").read_text()
