@@ -94,7 +94,7 @@ jobs:
             if (-not $d.StartsWith("XLauncher")) { Write-Error "нет описания у $exe"; exit 1 }
           }
           # переименованный pythonw находит встроенный Python и пакет
-          $p = Start-Process python\xlauncher-runner.exe -ArgumentList "-c","import xlauncher.runner, sys; sys.exit(7)" -Wait -PassThru
+          $p = Start-Process python\xlauncher-runner.exe -ArgumentList '-c "import xlauncher.runner, sys; sys.exit(7)"' -Wait -PassThru
           if ($p.ExitCode -ne 7) { Write-Error "xlauncher-runner.exe не запускает Python: код $($p.ExitCode)"; exit 1 }
           Pop-Location
 
