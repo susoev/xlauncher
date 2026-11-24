@@ -17,6 +17,7 @@ if TYPE_CHECKING:
 
 def create_app(updater: "Updater | None") -> FastAPI:
     app = FastAPI(title="xlauncher", version=__version__, docs_url=None, redoc_url=None)
+    app.state.last_ui_ping = None
 
     @app.exception_handler(KeyError)
     async def not_found(_: Request, e: KeyError):
@@ -45,6 +46,13 @@ def create_app(updater: "Updater | None") -> FastAPI:
             "updater": updater.status() if updater else {"state": "выключено (запуск из исходников)"},
             "engine": service.engine_status(),
         }
+
+    @app.post("/api/ui-ping")
+    def ui_ping() -> dict:
+        import time
+
+        app.state.last_ui_ping = time.time()
+        return {"ok": True}
 
     @app.post("/api/update/check")
     def update_check() -> dict:

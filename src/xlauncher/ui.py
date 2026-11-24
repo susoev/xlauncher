@@ -36,6 +36,10 @@ INDEX_HTML = r"""<!doctype html>
   .dlg .btns { display:flex; gap:8px; justify-content:flex-end; margin-top:16px; }
   table { width:100%; border-collapse:collapse; font-size:13px; } td, th { text-align:left; padding:5px 6px; border-bottom:1px solid var(--line); }
   .empty { text-align:center; padding:50px 0; color:var(--mut); }
+  #toasts { position:fixed; right:16px; bottom:16px; display:flex; flex-direction:column; gap:8px; z-index:50; max-width:420px; }
+  .toast { background:var(--card); border:1px solid var(--line); border-left:4px solid var(--acc); border-radius:8px; padding:10px 12px;
+           box-shadow:0 4px 16px rgba(0,0,0,.15); font-size:13px; cursor:pointer; }
+  .toast.err { border-left-color:var(--err); } .toast.ok { border-left-color:var(--ok); }
 </style></head>
 <body>
 <header>
@@ -61,6 +65,13 @@ INDEX_HTML = r"""<!doctype html>
   <div class="btns"><button type="button" onclick="form.close()">Отмена</button><button type="button" class="pri" id="f_save" onclick="saveForm()">Создать</button></div>
 </form></dialog>
 
+<dialog id="ask"><form class="dlg" method="dialog" onsubmit="return false">
+  <h3 id="askTitle"></h3><div id="askText" class="small"></div>
+  <input id="askInput" style="margin-top:10px; display:none">
+  <div class="btns"><button type="button" id="askNo">Отмена</button><button type="button" class="pri" id="askYes">ОК</button></div>
+</form></dialog>
+<div id="toasts"></div>
+
 <dialog id="hist"><div class="dlg">
   <h3 id="histTitle">История IP</h3><div id="histBody"></div>
   <div class="btns"><button onclick="hist.close()">Закрыть</button></div>
@@ -76,6 +87,26 @@ async function api(method, url, body) {
   return data;
 }
 let editing = null, profilesCache = [];
+
+// Свои уведомления и диалоги вместо alert/confirm/prompt: системные окна во встроенном
+// браузере модальны и могут открыться невидимыми, блокируя окно лаунчера.
+function toast(msg, kind = 'err', ms = 7000) {
+  const t = document.createElement('div');
+  t.className = 'toast ' + kind; t.textContent = msg; t.onclick = () => t.remove();
+  $('toasts').appendChild(t); setTimeout(() => t.remove(), ms);
+}
+function ask(title, text, {input = null, ok = 'ОК', danger = false} = {}) {
+  return new Promise(resolve => {
+    $('askTitle').textContent = title; $('askText').textContent = text || '';
+    const inp = $('askInput'); inp.style.display = input === null ? 'none' : 'block'; inp.value = input ?? '';
+    const yes = $('askYes'); yes.textContent = ok; yes.className = danger ? 'danger' : 'pri';
+    const done = v => { $('ask').close(); resolve(v); };
+    yes.onclick = () => done(input === null ? true : inp.value);
+    $('askNo').onclick = () => done(input === null ? false : null);
+    inp.onkeydown = e => { if (e.key === 'Enter') yes.onclick(); };
+    $('ask').showModal(); if (input !== null) inp.focus();
+  });
+}
 
 const STATUS = {
   starting: ['запуск…', 'wait'], checking: ['проверка прокси…', 'wait'], running: ['запущен', 'run'],
@@ -150,27 +181,27 @@ async function load() {
 let lastOk = 0;
 
 async function act(id, what, body) {
-  try { const r = await api('POST', `/api/profiles/${id}/${what}`, body || {}); if (r.ok === false && r.error) alert(r.error); }
-  catch (e) { alert(e.message); }
+  try { const r = await api('POST', `/api/profiles/${id}/${what}`, body || {}); if (r.ok === false && r.error) toast(r.error); }
+  catch (e) { toast(e.message); }
   load();
 }
 async function newIdentity(slug) {
-  if (!confirm(`Профилю «${slug}» будет выдан новый отпечаток, куки и история будут удалены. Продолжить?`)) return;
-  try { await api('POST', `/api/duplicates/${encodeURIComponent(slug)}/new-identity`); } catch (e) { alert(e.message); }
+  if (!await ask('Это новый профиль?', `Профилю «${slug}» будет выдан новый отпечаток, куки и история будут удалены.`, {ok: 'Выдать новый отпечаток', danger: true})) return;
+  try { await api('POST', `/api/duplicates/${encodeURIComponent(slug)}/new-identity`); toast('Готово', 'ok'); } catch (e) { toast(e.message); }
   load();
 }
 async function cloneP(id) {
   const p = profilesCache.find(x => x.id === id);
-  const name = prompt('Имя нового профиля (новый отпечаток, без кук):', (p?.name || '') + ' (копия)');
+  const name = await ask('Клонировать профиль', 'Копия получит новый отпечаток и не унаследует куки и историю. Расширения и закладки сохранятся.', {input: (p?.name || '') + ' (копия)', ok: 'Клонировать'});
   if (name === null) return;
-  try { await api('POST', `/api/profiles/${id}/clone`, {name}); } catch (e) { alert(e.message); }
+  try { await api('POST', `/api/profiles/${id}/clone`, {name}); toast('Клон создан', 'ok'); } catch (e) { toast(e.message); }
   load();
 }
 const nameOf = id => (profilesCache.find(x => x.id === id) || {}).name || '';
 async function delP(id) {
   const name = nameOf(id);
-  if (!confirm(`Удалить профиль «${name}»? Папка будет перенесена в backups\\, её можно вернуть вручную.`)) return;
-  try { await api('DELETE', `/api/profiles/${id}`); } catch (e) { alert(e.message); }
+  if (!await ask(`Удалить «${name}»?`, 'Папка профиля будет перенесена в backups\\ — её можно вернуть вручную.', {ok: 'Удалить', danger: true})) return;
+  try { await api('DELETE', `/api/profiles/${id}`); toast('Профиль перенесён в backups', 'ok'); } catch (e) { toast(e.message); }
   load();
 }
 async function showHistory(id) {
@@ -205,19 +236,20 @@ async function checkProxy() {
 async function saveForm() {
   const body = {name: $('f_name').value.trim(), group: $('f_group').value.trim(), proxy: $('f_proxy').value.trim(),
     start_urls: $('f_urls').value.split('\n').map(s => s.trim()).filter(Boolean), notes: $('f_notes').value};
-  if (!body.name) { alert('Укажи имя'); return; }
+  if (!body.name) { toast('Укажи имя'); return; }
   $('f_save').disabled = true;
   try {
     if (editing) await api('PATCH', `/api/profiles/${editing}`, body);
     else {
       const r = await api('POST', '/api/profiles', body);
-      if (r.check && !r.check.ok) alert('Профиль создан, но прокси не прошёл проверку: ' + r.check.error);
+      if (r.check && !r.check.ok) toast('Профиль создан, но прокси не прошёл проверку: ' + r.check.error, 'err', 12000);
     }
     form.close();
-  } catch (e) { alert(e.message); }
+  } catch (e) { toast(e.message); }
   $('f_save').disabled = false; load();
 }
 load(); setInterval(load, 2000);
+setInterval(() => fetch('/api/ui-ping', {method: 'POST', cache: 'no-store'}).catch(() => {}), 5000);
 window.addEventListener('focus', load);
 document.addEventListener('visibilitychange', () => { if (!document.hidden) load(); });
 </script></body></html>

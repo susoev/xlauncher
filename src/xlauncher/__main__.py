@@ -112,7 +112,8 @@ def main() -> int:
     updater = None if is_dev() else Updater(__version__, on_update_ready)
 
     port = pick_port()
-    start_server(create_app(updater), port)
+    web = create_app(updater)
+    start_server(web, port)
     url = f"http://127.0.0.1:{port}/"
     paths.write_atomic(paths.run_dir() / "app.json",
                        json.dumps({"version": __version__, "pid": os.getpid(), "port": port}))
@@ -141,6 +142,24 @@ def main() -> int:
             time.sleep(1)
 
     threading.Thread(target=watch_show_requests, name="show", daemon=True).start()
+
+    def ui_watchdog() -> None:
+        """Пишет в журнал, если страница в окне перестала откликаться (окно зависло)."""
+        silent = False
+        while not restart.is_set():
+            time.sleep(15)
+            last = web.state.last_ui_ping
+            if last is None:
+                continue
+            gap = time.time() - last
+            if gap > 60 and not silent:
+                silent = True
+                log.warning("окно не откликается %.0f с — интерфейс завис или окно свёрнуто", gap)
+            elif gap < 30 and silent:
+                silent = False
+                log.info("окно снова откликается")
+
+    threading.Thread(target=ui_watchdog, name="ui-watchdog", daemon=True).start()
 
     try:
         import webview
