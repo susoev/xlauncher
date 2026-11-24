@@ -7,6 +7,7 @@ import asyncio
 import os
 import sys
 
+import xlauncher  # noqa: F401  — как при реальном запуске: пакет подключает lib\\ (pywin32)
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 

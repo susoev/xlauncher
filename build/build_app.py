@@ -77,7 +77,10 @@ def main() -> None:
         z.extractall(stage / "python")
     pth = next((stage / "python").glob("python3*._pth"))
     stdlib_zip = next((stage / "python").glob("python3*.zip")).name
-    pth.write_text(f"{stdlib_zip}\n.\n..\\lib\n..\\src\nimport site\n", encoding="ascii")
+    # win32 и win32\\lib — пути pywin32 (обычно их добавляет его .pth, но встроенный Python читает .pth
+    # только из site-packages; xlauncher/__init__ дополнительно вызывает site.addsitedir).
+    pth.write_text(f"{stdlib_zip}\n.\n..\\lib\n..\\lib\\win32\n..\\lib\\win32\\lib\n..\\src\nimport site\n",
+                   encoding="ascii")
     # Свои имена процессов вместо «Python» в диспетчере задач. ._pth назван по DLL (python3XX._pth),
     # поэтому встроенный Python находит его при любом имени exe.
     py = stage / "python"
