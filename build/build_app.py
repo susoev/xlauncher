@@ -27,6 +27,7 @@ import zipfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 PY_MINOR = "3.13"
 # Чистый Python, выпускаются только исходниками: собираем wheel локально,
 # иначе pip с --only-binary откатывается на древние версии зависящих пакетов.
@@ -59,6 +60,7 @@ def main() -> None:
     ap.add_argument("--version", required=True)
     ap.add_argument("--out", default="dist")
     ap.add_argument("--python-zip", help="локальный python-3.13.x-embed-amd64.zip (иначе скачать)")
+    ap.add_argument("--no-brand", action="store_true", help="не менять иконку и описание exe (без Node.js)")
     a = ap.parse_args()
 
     out = (ROOT / a.out).resolve()
@@ -76,6 +78,15 @@ def main() -> None:
     pth = next((stage / "python").glob("python3*._pth"))
     stdlib_zip = next((stage / "python").glob("python3*.zip")).name
     pth.write_text(f"{stdlib_zip}\n.\n..\\lib\n..\\src\nimport site\n", encoding="ascii")
+    # Свои имена процессов вместо «Python» в диспетчере задач. ._pth назван по DLL (python3XX._pth),
+    # поэтому встроенный Python находит его при любом имени exe.
+    py = stage / "python"
+    for name, desc in (("XLauncher.exe", "XLauncher"), ("xlauncher-runner.exe", "XLauncher — профиль")):
+        shutil.copy2(py / "pythonw.exe", py / name)
+        if not a.no_brand:
+            from brand import brand
+
+            brand(py / name, desc, a.version)
 
     # 2. Зависимости под Windows x64
     wheelhouse = out / "wheelhouse"

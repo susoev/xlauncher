@@ -72,10 +72,12 @@ def create_profile(body: dict) -> dict:
 
 def _runner_cmd(pid: str, confirm_country: bool) -> tuple[list[str], dict, Path | None]:
     exe = sys.executable
-    if sys.platform == "win32" and exe.lower().endswith("python.exe"):
-        w = Path(exe).with_name("pythonw.exe")
-        if w.exists():
-            exe = str(w)
+    if sys.platform == "win32":
+        for name in ("xlauncher-runner.exe", "pythonw.exe"):  # своё имя процесса в диспетчере задач
+            w = Path(exe).with_name(name)
+            if w.exists():
+                exe = str(w)
+                break
     cmd = [exe, "-m", "xlauncher.runner", pid] + (["--confirm-country"] if confirm_country else [])
     env = dict(os.environ)
     src = str(Path(__file__).resolve().parents[2])  # папка, где лежит пакет xlauncher

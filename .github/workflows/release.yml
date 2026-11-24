@@ -56,6 +56,9 @@ jobs:
           CGO_ENABLED: "0"
         run: go build -trimpath -ldflags "-H windowsgui -s -w" -o ../dist/xlauncher.exe .
 
+      - name: Иконка и описание загрузчика
+        run: python build/brand.py dist/xlauncher.exe "XLauncher" "${{ steps.ver.outputs.version }}"
+
       - name: Сборка приложения
         run: python build/build_app.py --version "${{ steps.ver.outputs.version }}" --out dist
 
@@ -85,6 +88,14 @@ jobs:
           Push-Location app
           .\python\python.exe -m xlauncher --selftest
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          foreach ($exe in "python\XLauncher.exe", "python\xlauncher-runner.exe") {
+            $d = (Get-Item $exe).VersionInfo.FileDescription
+            Write-Host "$exe -> $d"
+            if (-not $d.StartsWith("XLauncher")) { Write-Error "нет описания у $exe"; exit 1 }
+          }
+          # переименованный pythonw находит встроенный Python и пакет
+          $p = Start-Process python\xlauncher-runner.exe -ArgumentList "-c","import xlauncher.runner, sys; sys.exit(7)" -Wait -PassThru
+          if ($p.ExitCode -ne 7) { Write-Error "xlauncher-runner.exe не запускает Python: код $($p.ExitCode)"; exit 1 }
           Pop-Location
 
   release:

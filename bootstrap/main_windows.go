@@ -163,7 +163,11 @@ func launch(root, ver string) (int, bool) {
 	readyFile := filepath.Join(root, "run", "ready-"+ver)
 	os.Remove(readyFile)
 
-	cmd := exec.Command(filepath.Join(dir, "python", "pythonw.exe"), "-m", "xlauncher")
+	exe := filepath.Join(dir, "python", "XLauncher.exe") // своё имя в диспетчере задач
+	if !exists(exe) {
+		exe = filepath.Join(dir, "python", "pythonw.exe") // версии до 2026.11.24.7
+	}
+	cmd := exec.Command(exe, "-m", "xlauncher")
 	cmd.Dir = dir
 	cmd.Env = append(os.Environ(),
 		"XL_ROOT="+root,

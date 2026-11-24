@@ -17,6 +17,7 @@ import threading
 import time
 import urllib.request
 import webbrowser
+from pathlib import Path
 
 from . import __version__, is_dev, paths
 
@@ -88,6 +89,7 @@ def selftest() -> int:
                              timezone="Europe/Moscow")
     assert f"--fingerprint={fp['seed']}" in args and "--lang=ru-RU" in args, args
     assert proxy.parse_proxy("h:1:u:p").user == "u"
+    assert (Path(__file__).with_name("assets") / "xlauncher.ico").exists()
     if sys.platform == "win32":
         import webview  # noqa: F401
         from webview.platforms import winforms  # noqa: F401  — проверяет pythonnet/.NET
@@ -175,12 +177,19 @@ def main() -> int:
 
     threading.Thread(target=ui_watchdog, name="ui-watchdog", daemon=True).start()
 
+    icon = str(Path(__file__).with_name("assets") / "xlauncher.ico")
+    if sys.platform == "win32":
+        try:  # своя иконка и группа на панели задач, а не «Python»
+            import ctypes
+
+            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("susoev.XLauncher")
+        except Exception:  # noqa: BLE001
+            pass
     try:
         import webview
 
-        window_ref["w"] = webview.create_window(f"xlauncher {__version__}", url, width=880, height=640,
-                                                min_size=(640, 480))
-        webview.start()
+        window_ref["w"] = webview.create_window("XLauncher", url, width=1040, height=700, min_size=(720, 480))
+        webview.start(icon=icon)
     except Exception:  # noqa: BLE001
         log.exception("окно не открылось — открываю интерфейс в браузере по умолчанию")
         webbrowser.open(url)
