@@ -4,7 +4,8 @@
 # ///
 """Диагностика падений canvas и подмены аудио в fingerprint-chromium.
 
-Запуск из корня репозитория:  uv run spike\\canvas_diag.py
+Запуск из корня репозитория:  uv run spike\\canvas_diag.py [150,149,148,147]
+(список мажорных версий движка; без аргумента — последняя скачанная)
 
 Без прокси (проверяется только поведение движка). Запускает браузер в нескольких
 конфигурациях (разные seed, выключение отдельных подмен, без GPU) и в каждой
@@ -29,15 +30,24 @@ try:
 except Exception:
     pass
 
-SEED1, SEED2 = 1111111111, 2222222222
+SEED1, SEED2, SEED3 = 1111111111, 2222222222, 3333333333
 
-CONFIGS: dict[str, list[str]] = {
+FULL_CONFIGS: dict[str, list[str]] = {
     "seed1": [f"--fingerprint={SEED1}"],
     "seed2": [f"--fingerprint={SEED2}"],
     "seed1 без canvas-подмены": [f"--fingerprint={SEED1}", "--disable-spoofing=canvas"],
     "seed1 без font-подмены": [f"--fingerprint={SEED1}", "--disable-spoofing=font"],
     "seed1 без canvas+font": [f"--fingerprint={SEED1}", "--disable-spoofing=canvas,font"],
     "seed1 без всех подмен": [f"--fingerprint={SEED1}", "--disable-spoofing=font,audio,canvas,clientrects,gpu"],
+    "seed1 без GPU-ускорения": [f"--fingerprint={SEED1}", "--disable-gpu"],
+    "без --fingerprint": [],
+}
+
+# Для сравнения версий движка — короткий набор.
+COMPARE_CONFIGS: dict[str, list[str]] = {
+    "seed1": [f"--fingerprint={SEED1}"],
+    "seed2": [f"--fingerprint={SEED2}"],
+    "seed3": [f"--fingerprint={SEED3}"],
     "seed1 без GPU-ускорения": [f"--fingerprint={SEED1}", "--disable-gpu"],
     "без --fingerprint": [],
 }
@@ -153,25 +163,9 @@ async def run_config(exe: Path, name: str, extra: list[str], pw) -> dict:
     return res
 
 
-async def main() -> None:
-    OUT.mkdir(exist_ok=True)
-    exe, ver = ensure_engine()
-    from playwright.async_api import async_playwright
-
-    results: dict[str, dict] = {}
-    async with async_playwright() as pw:
-        for name, extra in CONFIGS.items():
-            log(f"Конфигурация: {name}")
-            results[name] = await run_config(exe, name, extra, pw)
-            crashed = [t for t, r in results[name].items() if not t.startswith("_") and not r["ok"]]
-            log(f"  упало/ошибки: {', '.join(crashed) or 'нет'}")
-
-    (OUT / "canvas_report.json").write_text(
-        json.dumps({"engine": ver, "when": datetime.now().isoformat(timespec="seconds"), "results": results},
-                   ensure_ascii=False, indent=2), encoding="utf-8")
+def table(results: dict[str, dict]) -> list[str]:
     cfgs = list(results)
-    lines = [f"# Диагностика canvas/audio — движок {ver}", "",
-             "| Тест | " + " | ".join(cfgs) + " |", "|---|" + "---|" * len(cfgs)]
+    lines = ["| Тест | " + " | ".join(cfgs) + " |", "|---|" + "---|" * len(cfgs)]
     for t in TESTS:
         row = []
         for c in cfgs:
@@ -180,7 +174,43 @@ async def main() -> None:
         lines.append(f"| {t} | " + " | ".join(row) + " |")
     errs = {c: r["_error"] for c, r in results.items() if "_error" in r}
     if errs:
-        lines += ["", "## Ошибки запуска", "", *[f"- {c}: {e}" for c, e in errs.items()]]
+        lines += ["", "Ошибки запуска:", "", *[f"- {c}: {e}" for c, e in errs.items()]]
+    return lines
+
+
+async def main() -> None:
+    OUT.mkdir(exist_ok=True)
+    majors = [int(x) for x in sys.argv[1].split(",")] if len(sys.argv) > 1 else [None]
+    configs = COMPARE_CONFIGS if len(majors) > 1 else FULL_CONFIGS
+    from playwright.async_api import async_playwright
+
+    all_results: dict[str, dict] = {}
+    async with async_playwright() as pw:
+        for major in majors:
+            try:
+                exe, ver = ensure_engine(major)
+            except Exception as e:  # noqa: BLE001
+                log(f"Версия {major}: не удалось получить движок — {e}")
+                all_results[str(major)] = {"_engine_error": str(e)}
+                continue
+            results: dict[str, dict] = {}
+            for name, extra in configs.items():
+                log(f"[{ver}] {name}")
+                results[name] = await run_config(exe, name, extra, pw)
+                crashed = [t for t, r in results[name].items() if not t.startswith("_") and not r["ok"]]
+                log(f"  упало/ошибки: {', '.join(crashed) or 'нет'}")
+            all_results[ver] = results
+
+    (OUT / "canvas_report.json").write_text(
+        json.dumps({"when": datetime.now().isoformat(timespec="seconds"), "results": all_results},
+                   ensure_ascii=False, indent=2), encoding="utf-8")
+    lines = ["# Диагностика canvas/audio", ""]
+    for ver, results in all_results.items():
+        lines += [f"## Движок {ver}", ""]
+        if "_engine_error" in results:
+            lines += [f"Не удалось получить: {results['_engine_error']}", ""]
+            continue
+        lines += [*table(results), ""]
     (OUT / "canvas_report.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
     log(f"Готово. Отчёт: {OUT / 'canvas_report.md'}")
 

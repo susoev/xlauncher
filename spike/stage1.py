@@ -249,16 +249,26 @@ def cookie_prefixes(data_dir: Path) -> dict[str, int]:
 # ---------------------------------------------------------------- движок
 
 
-def ensure_engine() -> tuple[Path, str]:
+def ensure_engine(major: int | None = None) -> tuple[Path, str]:
+    """Скачивает движок. major=None — последний релиз (или уже скачанный), иначе последняя сборка этой мажорной версии."""
     ENGINES.mkdir(parents=True, exist_ok=True)
     existing = sorted(ENGINES.glob("*/**/chrome.exe"))
+    if major is not None:
+        existing = [e for e in existing if e.relative_to(ENGINES).parts[0].startswith(f"{major}.")]
     if existing:
         exe = existing[-1]
         ver = exe.relative_to(ENGINES).parts[0]
         log(f"Движок уже скачан: {ver}")
         return exe, ver
-    log("Ищу последний релиз fingerprint-chromium…")
-    rel = json.loads(http_get(f"https://api.github.com/repos/{REPO}/releases/latest"))
+    if major is None:
+        log("Ищу последний релиз fingerprint-chromium…")
+        rel = json.loads(http_get(f"https://api.github.com/repos/{REPO}/releases/latest"))
+    else:
+        log(f"Ищу релиз fingerprint-chromium {major}…")
+        rels = json.loads(http_get(f"https://api.github.com/repos/{REPO}/releases?per_page=50"))
+        rel = next((r for r in rels if r["tag_name"].startswith(f"{major}.")), None)
+        if not rel:
+            raise RuntimeError(f"Нет релиза версии {major}. Есть: {[r['tag_name'] for r in rels][:15]}")
     tag = rel["tag_name"]
     assets = rel.get("assets", [])
     names = [a["name"] for a in assets]
