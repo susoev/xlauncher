@@ -34,30 +34,76 @@ class Stop(Exception):
         self.code, self.status, self.error, self.extra = code, status, error, extra
 
 
+def _close_windows(pid: int) -> int:
+    """Посылает WM_CLOSE всем видимым окнам процесса — как нажатие крестика. Возвращает число окон."""
+    import ctypes
+    from ctypes import wintypes
+
+    user32 = ctypes.windll.user32
+    user32.GetWindowThreadProcessId.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.DWORD)]
+    user32.IsWindowVisible.argtypes = [wintypes.HWND]
+    user32.PostMessageW.argtypes = [wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM]
+    found: list = []
+
+    @ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+    def cb(hwnd, _):
+        owner = wintypes.DWORD()
+        user32.GetWindowThreadProcessId(hwnd, ctypes.byref(owner))
+        if owner.value == pid and user32.IsWindowVisible(hwnd):
+            found.append(hwnd)
+        return True
+
+    user32.EnumWindows(cb, 0)
+    for h in found:
+        user32.PostMessageW(h, 0x0010, 0, 0)  # WM_CLOSE
+    return len(found)
+
+
 def _close_browser(proc: subprocess.Popen) -> None:
-    """Мягко закрывает браузер (как крестиком), через 15 с — принудительно."""
+    """Закрывает окна браузера (как крестиком), через 20 с — принудительно.
+
+    Мягкое закрытие важно: браузер успевает сохранить куки и сессию.
+    """
     if proc.poll() is not None:
         return
     if sys.platform == "win32":
-        r = subprocess.run(["taskkill", "/PID", str(proc.pid), "/T"], capture_output=True, timeout=20,
-                           creationflags=subprocess.CREATE_NO_WINDOW)
-        log.info("taskkill: код %s", r.returncode)
+        n = _close_windows(proc.pid)
+        log.info("закрываю окна браузера: %d", n)
     else:
         proc.terminate()
     try:
-        proc.wait(15)
+        proc.wait(20)
+        return
     except subprocess.TimeoutExpired:
-        log.warning("браузер не закрылся за 15 с — завершаю принудительно")
-        if sys.platform == "win32":
-            subprocess.run(["taskkill", "/PID", str(proc.pid), "/T", "/F"], capture_output=True, timeout=20,
+        pass
+    log.warning("браузер не закрылся за 20 с — завершаю принудительно (возможно, на странице вопрос «Покинуть сайт?»)")
+    if sys.platform == "win32":
+        r = subprocess.run(["taskkill", "/PID", str(proc.pid), "/T", "/F"], capture_output=True, timeout=20,
                            creationflags=subprocess.CREATE_NO_WINDOW)
-        proc.kill()
-        proc.wait(5)
+        log.info("taskkill /F: код %s %s", r.returncode, (r.stdout or r.stderr).decode("cp866", "replace").strip())
+    proc.kill()
+    proc.wait(5)
+
+
+def _quiet_connection_resets(loop: asyncio.AbstractEventLoop) -> None:
+    """На Windows обрыв соединения браузером при закрытии — норма, не пишем его как ошибку."""
+    default = loop.get_exception_handler()
+
+    def handler(lp, ctx):
+        if isinstance(ctx.get("exception"), ConnectionResetError | ConnectionAbortedError | BrokenPipeError):
+            return
+        if default:
+            default(lp, ctx)
+        else:
+            lp.default_exception_handler(ctx)
+
+    loop.set_exception_handler(handler)
 
 
 async def run(pid: str, confirm_country: bool) -> int:
     from .core.geo import lookup
 
+    _quiet_connection_resets(asyncio.get_running_loop())
     cfg = settings.load()
     p = profiles.get(pid)
     state = lambda **kw: runstate.write(pid, **kw)  # noqa: E731
