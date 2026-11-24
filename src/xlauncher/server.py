@@ -98,7 +98,11 @@ def create_app(updater: "Updater | None") -> FastAPI:
 
     @app.post("/api/profiles/{pid}/start")
     def start(pid: str, body: dict = Body(default={})) -> dict:
-        return service.start(pid, bool(body.get("confirm_country")))
+        return service.start(pid, bool(body.get("confirm_country")), bool(body.get("agent")))
+
+    @app.post("/api/profiles/{pid}/browser/{action}")
+    def browser_action(pid: str, action: str, body: dict = Body(default={})) -> dict:
+        return service.browser_action(pid, action, body)
 
     @app.post("/api/profiles/{pid}/stop")
     def stop(pid: str) -> dict:

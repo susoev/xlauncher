@@ -315,7 +315,7 @@ function renderDetail() {
     : v.active
     ? `<button class="bigbtn" onclick="act('${p.id}','stop')" ${st.status === 'stopping' ? 'disabled' : ''}>Остановить</button>`
     : `<button class="bigbtn primary" onclick="act('${p.id}','start')" ${p.duplicate ? 'disabled' : ''}>Запустить</button>`;
-  const statusLine = st.status === 'running' ? `${v.text}, работает ${since(st.started)}` : v.text;
+  const statusLine = st.status === 'running' ? `${v.text}, работает ${since(st.started)}${st.agent ? ', управляет агент' : ''}` : v.text;
   const hist = detailCache.id === p.id ? detailCache.history : [];
   const log = detailCache.id === p.id ? detailCache.log : [];
   const SRC = {launch:'при запуске', monitor:'во время работы', create:'при создании'};

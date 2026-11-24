@@ -85,6 +85,9 @@ def selftest() -> int:
     from .core import engine, fingerprint, portability, probe, proxy, service, uniqueness  # noqa: F401
     import websockets  # noqa: F401
 
+    from . import mcp_server  # noqa: F401
+    from .core import browser  # noqa: F401
+
     fp = fingerprint.generate("RU")
     args = engine.build_args(data_dir=paths.root(), cache_dir=paths.root(), fingerprint=fp, proxy_port=1,
                              timezone="Europe/Moscow")
@@ -94,6 +97,8 @@ def selftest() -> int:
     if sys.platform == "win32":
         import webview  # noqa: F401
         from webview.platforms import winforms  # noqa: F401  — проверяет pythonnet/.NET
+
+        import win32api  # noqa: F401  — pywin32 подключён (нужен mcp)
 
         secret = b"xlauncher-selftest"
         assert portability.dpapi_unprotect(portability.dpapi_protect(secret)) == secret

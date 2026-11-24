@@ -34,6 +34,14 @@ class Stop(Exception):
         self.code, self.status, self.error, self.extra = code, status, error, extra
 
 
+def _free_port() -> int:
+    import socket
+
+    with socket.socket() as sk:
+        sk.bind(("127.0.0.1", 0))
+        return sk.getsockname()[1]
+
+
 def _close_windows(pid: int) -> int:
     """Посылает WM_CLOSE всем видимым окнам процесса — как нажатие крестика. Возвращает число окон."""
     import ctypes
@@ -100,7 +108,7 @@ def _quiet_connection_resets(loop: asyncio.AbstractEventLoop) -> None:
     loop.set_exception_handler(handler)
 
 
-async def run(pid: str, confirm_country: bool) -> int:
+async def run(pid: str, confirm_country: bool, agent: bool = False) -> int:
     from .core.geo import lookup
 
     _quiet_connection_resets(asyncio.get_running_loop())
@@ -156,18 +164,20 @@ async def run(pid: str, confirm_country: bool) -> int:
         tz = geo.get("timezone") if fp.get("timezone", "auto") == "auto" else fp["timezone"]
         cache = profiles.cache_dir(pid)
         cache.mkdir(parents=True, exist_ok=True)
+        cdp_port = _free_port() if agent else None
         args = engine.build_args(data_dir=data_dir, cache_dir=cache, fingerprint=fp, proxy_port=fwd.port,
-                                 timezone=tz, urls=p.data.get("start_urls"))
+                                 timezone=tz, cdp_port=cdp_port, urls=p.data.get("start_urls"))
 
         # ---- запуск
         flags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
         proc = subprocess.Popen([str(exe), *args], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                                 creationflags=flags)
         profiles.touch_machine(p, version)
-        profiles.append_launch_log(p, f"запуск\t{ip}\t{geo.get('country')}\t{geo.get('city')}\t"
-                                      f"ключ:{key_state}\tдвижок:{version}")
+        profiles.append_launch_log(p, f"{'запуск агентом' if agent else 'запуск'}\t{ip}\t{geo.get('country')}\t"
+                                      f"{geo.get('city')}\tключ:{key_state}\tдвижок:{version}")
         state(status="running", chrome_pid=proc.pid, ip=ip, geo=geo, timezone=tz, key_state=key_state,
-              engine_version=version, forwarder_port=fwd.port, last_ip_check=time.time())
+              engine_version=version, forwarder_port=fwd.port, last_ip_check=time.time(), cdp_port=cdp_port,
+              agent=agent)
         log.info("профиль %s запущен: %s %s", p.slug, ip, geo.get("country"))
 
         # ---- работа
@@ -229,7 +239,7 @@ async def monitor_ip(p, pid: str, fwd: Forwarder, lookup, state) -> None:
 def main() -> int:
     args = [a for a in sys.argv[1:] if not a.startswith("--")]
     if not args:
-        print("использование: python -m xlauncher.runner <profile_id> [--confirm-country]")
+        print("использование: python -m xlauncher.runner <profile_id> [--confirm-country] [--agent]")
         return EXIT_ERROR
     pid = args[0]
     paths.ensure()
@@ -240,7 +250,7 @@ def main() -> int:
         return EXIT_ERROR
     runstate.stop_file(pid).unlink(missing_ok=True)
     try:
-        code = asyncio.run(run(pid, "--confirm-country" in sys.argv))
+        code = asyncio.run(run(pid, "--confirm-country" in sys.argv, "--agent" in sys.argv))
         runstate.clear(pid)
         return code
     except Stop as s:

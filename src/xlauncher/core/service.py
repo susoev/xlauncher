@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import subprocess
 import sys
@@ -87,7 +88,7 @@ def audit_start() -> dict:
     return uniqueness.auditor.state
 
 
-def _runner_cmd(pid: str, confirm_country: bool) -> tuple[list[str], dict, Path | None]:
+def _runner_cmd(pid: str, confirm_country: bool, agent: bool = False) -> tuple[list[str], dict, Path | None]:
     exe = sys.executable
     if sys.platform == "win32":
         for name in ("xlauncher-runner.exe", "pythonw.exe"):  # своё имя процесса в диспетчере задач
@@ -95,14 +96,15 @@ def _runner_cmd(pid: str, confirm_country: bool) -> tuple[list[str], dict, Path 
             if w.exists():
                 exe = str(w)
                 break
-    cmd = [exe, "-m", "xlauncher.runner", pid] + (["--confirm-country"] if confirm_country else [])
+    cmd = [exe, "-m", "xlauncher.runner", pid] + (["--confirm-country"] if confirm_country else []) \
+        + (["--agent"] if agent else [])
     env = dict(os.environ)
     src = str(Path(__file__).resolve().parents[2])  # папка, где лежит пакет xlauncher
     env["PYTHONPATH"] = src + (os.pathsep + env["PYTHONPATH"] if env.get("PYTHONPATH") else "")
     return cmd, env, Path(src)
 
 
-def start(pid: str, confirm_country: bool = False) -> dict:
+def start(pid: str, confirm_country: bool = False, agent: bool = False) -> dict:
     p = profiles.get(pid)  # проверяет существование и дубли
     if runstate.is_active(pid):
         return {"ok": False, "error": "профиль уже запущен"}
@@ -112,7 +114,7 @@ def start(pid: str, confirm_country: bool = False) -> dict:
         return {"ok": False, "error": f"движок {version} скачивается — запусти профиль, когда загрузка закончится",
                 "engine": engine.installer.state}
     runstate.clear(pid)
-    cmd, env, cwd = _runner_cmd(pid, confirm_country)
+    cmd, env, cwd = _runner_cmd(pid, confirm_country, agent)
     flags = 0
     if sys.platform == "win32":
         flags = subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.CREATE_NO_WINDOW
@@ -169,3 +171,63 @@ def open_folder(path: Path) -> dict:
         os.startfile(str(path))  # noqa: S606
         return {"ok": True}
     return {"ok": False, "error": "открыть папку можно только на Windows", "path": str(path)}
+
+
+# ---------------------------------------------------------------- браузер для агентов
+
+BROWSER_ACTIONS = {"tabs", "new_tab", "activate_tab", "close_tab", "navigate", "snapshot", "click", "type", "press_key",
+                   "scroll", "screenshot", "wait"}
+
+
+def browser_action(pid: str, action: str, args: dict) -> dict:
+    """Действие агента в браузере профиля. Только для профиля, запущенного с доступом агента."""
+    import base64
+
+    from . import browser
+
+    if action not in BROWSER_ACTIONS:
+        raise ValueError(f"неизвестное действие {action}")
+    p = profiles.get(pid)
+    st = runstate.read(pid) or {}
+    if st.get("status") != "running":
+        raise ValueError("профиль не запущен")
+    port = st.get("cdp_port")
+    if not port:
+        raise ValueError("профиль запущен без доступа агента — останови его и запусти через агента")
+    tab = args.get("tab")
+    try:
+        if action == "tabs":
+            res: dict = {"tabs": browser.tabs(port)}
+        elif action == "new_tab":
+            res = browser.new_tab(port, args.get("url") or "about:blank")
+        elif action == "activate_tab":
+            browser.activate_tab(port, args["tab"])
+            res = {"ok": True}
+        elif action == "close_tab":
+            browser.close_tab(port, args["tab"])
+            res = {"ok": True}
+        elif action == "navigate":
+            res = _run_async(browser.navigate(port, args["url"], tab))
+        elif action == "snapshot":
+            snap = _run_async(browser.snapshot(port, tab, int(args.get("text_limit") or 3000)))
+            res = {"text": browser.format_snapshot(snap), "url": snap["url"], "title": snap["title"]}
+        elif action == "click":
+            res = _run_async(browser.click(port, args["ref"], tab))
+        elif action == "type":
+            res = _run_async(browser.type_text(port, args["ref"], args["text"], bool(args.get("submit")),
+                                               args.get("clear", True), tab))
+        elif action == "press_key":
+            res = _run_async(browser.press_key(port, args["key"], tab))
+        elif action == "scroll":
+            res = _run_async(browser.scroll(port, int(args.get("dy") or 600), tab))
+        elif action == "screenshot":
+            res = {"jpeg_base64": base64.b64encode(_run_async(browser.screenshot(port, tab))).decode()}
+        else:
+            res = _run_async(browser.wait_for(port, args.get("text"), float(args.get("seconds") or 2), tab))
+    except browser.BrowserError as e:
+        raise ValueError(str(e)) from e
+    except KeyError as e:
+        raise ValueError(f"не хватает параметра {e.args[0]}") from e
+    detail = {k: (v if k != "text" else f"{len(str(v))} симв.") for k, v in args.items() if k != "tab"}
+    profiles.append_launch_log(p, f"агент: {action}\t{json.dumps(detail, ensure_ascii=False)[:200]}")
+    return res

@@ -74,6 +74,8 @@ jobs:
     needs: build
     runs-on: windows-latest
     steps:
+      - uses: actions/checkout@v4
+
       - uses: actions/download-artifact@v4
         with:
           name: dist
@@ -96,6 +98,10 @@ jobs:
           # переименованный pythonw находит встроенный Python и пакет
           $p = Start-Process python\xlauncher-runner.exe -ArgumentList '-c "import xlauncher.runner, sys; sys.exit(7)"' -Wait -PassThru
           if ($p.ExitCode -ne 7) { Write-Error "xlauncher-runner.exe не запускает Python: код $($p.ExitCode)"; exit 1 }
+          # MCP по stdio: приложение не запущено, list_profiles попробует его поднять — без xlauncher.exe вернёт ошибку,
+          # но рукопожатие и список инструментов должны пройти
+          .\python\python.exe ..\build\smoke_mcp.py
+          if ($LASTEXITCODE -ne 0) { Write-Error "MCP-рукопожатие не прошло"; exit 1 }
           Pop-Location
 
   release:

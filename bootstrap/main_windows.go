@@ -66,6 +66,12 @@ func main() {
 	}
 	log.SetFlags(log.LstdFlags)
 
+	// MCP-сервер для Claude и других агентов: stdio передаётся текущей версии приложения.
+	// Работает параллельно с окном лаунчера, поэтому до проверки «один экземпляр».
+	if len(os.Args) > 1 && os.Args[1] == "--mcp" {
+		os.Exit(runMCP(root))
+	}
+
 	// Один экземпляр на пользователя Windows.
 	name, _ := syscall.UTF16PtrFromString(`Local\xlauncher-bootstrap`)
 	h, _, callErr := procCreateMutex.Call(0, 0, uintptr(unsafe.Pointer(name)))
@@ -212,4 +218,28 @@ func appendLine(path, line string) {
 	}
 	defer f.Close()
 	f.WriteString(line + "\n")
+}
+
+// runMCP запускает python -m xlauncher.mcp_server текущей версии с унаследованными stdin/stdout.
+func runMCP(root string) int {
+	ver := readTrim(filepath.Join(root, "app", "current.txt"))
+	py := filepath.Join(root, "app", ver, "python", "python.exe")
+	if ver == "" || !exists(py) {
+		fmt.Fprintln(os.Stderr, "XLauncher ещё не установлен: запусти xlauncher.exe один раз без параметров")
+		return 1
+	}
+	cmd := exec.Command(py, "-m", "xlauncher.mcp_server")
+	cmd.Dir = filepath.Join(root, "app", ver)
+	cmd.Env = append(os.Environ(), "XL_ROOT="+root, "PYTHONIOENCODING=utf-8")
+	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
+	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true, CreationFlags: 0x08000000} // CREATE_NO_WINDOW
+	log.Printf("MCP: версия %s", ver)
+	if err := cmd.Run(); err != nil {
+		if ee, ok := err.(*exec.ExitError); ok {
+			return ee.ExitCode()
+		}
+		log.Printf("MCP: %v", err)
+		return 1
+	}
+	return 0
 }
