@@ -12,6 +12,9 @@ from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 
 
+sys.stdout.reconfigure(encoding="utf-8")
+
+
 async def main() -> None:
     params = StdioServerParameters(command=sys.executable, args=["-m", "xlauncher.mcp_server"], env=dict(os.environ))
     async with stdio_client(params) as (r, w), ClientSession(r, w) as s:
