@@ -16,6 +16,7 @@
 ```powershell
 # один раз: установить uv
 powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
+$env:Path = "$env:USERPROFILE\.local\bin;$env:Path"   # чтобы uv был виден в этом же окне
 
 # склонировать репозиторий и запустить
 git clone https://github.com/susoev/xlauncher C:\xlauncher
