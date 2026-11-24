@@ -62,7 +62,7 @@ INDEX_HTML = """<!doctype html>
 </style></head>
 <body><main>
   <h1>xlauncher <span id="ver" class="mut"></span></h1>
-  <div class="mut">Этап 2: автообновления. Профили появятся на следующем этапе.</div>
+  <div class="mut">Эта версия приехала автообновлением. Профили появятся на следующем этапе.</div>
   <div class="card"><dl id="st"></dl></div>
   <div class="card"><button id="chk">Проверить обновления сейчас</button> <span id="msg" class="mut"></span></div>
 </main>
