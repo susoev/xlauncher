@@ -21,7 +21,7 @@ import sys
 import time
 
 from . import __version__, paths, settings
-from .core import engine, iphistory, portability, prefs, profiles, runstate
+from .core import engine, iphistory, policies, portability, prefs, profiles, runstate
 from .core.proxy import Forwarder, ProxyError, external_ip, parse_proxy
 
 log = logging.getLogger("xlauncher.runner")
@@ -158,6 +158,10 @@ async def run(pid: str, confirm_country: bool, agent: bool = False) -> int:
         data_dir.mkdir(exist_ok=True)
         portability.clear_locks(data_dir)
         prefs.apply(data_dir)
+        try:
+            policies.apply()  # Google — поисковик по умолчанию во всех профилях
+        except OSError as e:
+            log.warning("политики браузера: %s", e)
         key_state = portability.restore_key(p.dir) if sys.platform == "win32" else "skipped"
         if key_state == "no-backup":
             log.warning("ключ кук не расшифровывается, резервной копии нет — сайты попросят войти заново")

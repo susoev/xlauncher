@@ -102,6 +102,14 @@ def selftest() -> int:
 
         import win32api  # noqa: F401  — pywin32 подключён (нужен mcp)
 
+        from .core import policies
+
+        policies.apply()
+        import winreg
+
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, policies.KEY) as k:
+            assert winreg.QueryValueEx(k, "DefaultSearchProviderName")[0] == "Google"
+
         secret = b"xlauncher-selftest"
         assert portability.dpapi_unprotect(portability.dpapi_protect(secret)) == secret
     print(f"selftest OK {__version__}")
