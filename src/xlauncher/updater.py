@@ -200,6 +200,12 @@ class Updater:
     def cleanup(self) -> None:
         """Оставляет только текущую и предыдущую версии."""
         keep = {paths.read_trim(self.app / "current.txt"), paths.read_trim(self.app / "previous.txt"), self.current}
+        try:
+            from .core.runstate import active_app_versions
+
+            keep |= active_app_versions()  # из этих версий работают раннеры открытых браузеров
+        except Exception:  # noqa: BLE001
+            pass
         if not self.app.exists():
             return
         for d in self.app.iterdir():

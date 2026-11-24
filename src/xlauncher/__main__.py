@@ -68,9 +68,20 @@ def selftest() -> int:
     start_server(create_app(None), port)
     body = json.loads(urllib.request.urlopen(f"http://127.0.0.1:{port}/api/health", timeout=5).read())
     assert body["ok"] and body["version"] == __version__, body
+    from . import runner, ui  # noqa: F401
+    from .core import engine, fingerprint, portability, proxy, service  # noqa: F401
+
+    fp = fingerprint.generate("RU")
+    args = engine.build_args(data_dir=paths.root(), cache_dir=paths.root(), fingerprint=fp, proxy_port=1,
+                             timezone="Europe/Moscow")
+    assert f"--fingerprint={fp['seed']}" in args and "--lang=ru-RU" in args, args
+    assert proxy.parse_proxy("h:1:u:p").user == "u"
     if sys.platform == "win32":
         import webview  # noqa: F401
         from webview.platforms import winforms  # noqa: F401  — проверяет pythonnet/.NET
+
+        secret = b"xlauncher-selftest"
+        assert portability.dpapi_unprotect(portability.dpapi_protect(secret)) == secret
     print(f"selftest OK {__version__}")
     return 0
 
