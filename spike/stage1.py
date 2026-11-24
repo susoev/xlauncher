@@ -57,74 +57,62 @@ CACHE = OUT / "cache"
 REPO = "adryfish/fingerprint-chromium"
 UA = {"User-Agent": "xlauncher-spike"}
 
-COLLECT_JS = r"""
-async () => {
-  const r = {};
-  const n = navigator;
-  r.userAgent = n.userAgent;
-  r.platform = n.platform;
-  r.hardwareConcurrency = n.hardwareConcurrency;
-  r.deviceMemory = n.deviceMemory;
-  r.languages = n.languages;
-  r.webdriver = n.webdriver;
-  r.timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
-  r.tzOffset = new Date().getTimezoneOffset();
-  r.screen = [screen.width, screen.height, screen.colorDepth, devicePixelRatio];
-  try {
-    const h = await n.userAgentData.getHighEntropyValues(['platform','platformVersion','fullVersionList','architecture']);
-    r.uaData = {
-      brands: n.userAgentData.brands.map(b => b.brand + ' ' + b.version),
-      platform: h.platform, platformVersion: h.platformVersion, architecture: h.architecture,
-      fullVersionList: h.fullVersionList.map(b => b.brand + ' ' + b.version),
-    };
-  } catch (e) { r.uaData = 'err ' + e; }
-  const sha = async (s) => {
-    const d = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(s));
-    return [...new Uint8Array(d)].map(x => x.toString(16).padStart(2, '0')).join('').slice(0, 16);
-  };
-  try {
-    const c = document.createElement('canvas'); c.width = 280; c.height = 60;
-    const x = c.getContext('2d');
-    x.textBaseline = 'top'; x.font = '16px Arial';
-    x.fillStyle = '#f60'; x.fillRect(100, 1, 62, 20);
-    x.fillStyle = '#069'; x.fillText('xlauncher ✓ 1.0 <canvas>', 2, 15);
-    x.fillStyle = 'rgba(102,204,0,0.7)'; x.fillText('xlauncher ✓ 1.0 <canvas>', 4, 17);
-    r.canvas = await sha(c.toDataURL());
-  } catch (e) { r.canvas = 'err ' + e; }
-  try {
-    const gl = document.createElement('canvas').getContext('webgl');
-    const ext = gl.getExtension('WEBGL_debug_renderer_info');
-    r.webglVendor = gl.getParameter(ext.UNMASKED_VENDOR_WEBGL);
-    r.webglRenderer = gl.getParameter(ext.UNMASKED_RENDERER_WEBGL);
-  } catch (e) { r.webglRenderer = 'err ' + e; }
-  try {
-    const ctx = new OfflineAudioContext(1, 44100, 44100);
-    const o = ctx.createOscillator(); o.type = 'triangle'; o.frequency.value = 10000;
-    const comp = ctx.createDynamicsCompressor();
-    o.connect(comp); comp.connect(ctx.destination); o.start(0);
-    const buf = await ctx.startRendering();
-    let s = 0; for (const v of buf.getChannelData(0).slice(4500, 5000)) s += Math.abs(v);
-    r.audio = s.toString();
-  } catch (e) { r.audio = 'err ' + e; }
-  try { r.ipSeen = (await (await fetch('https://api.ipify.org?format=json')).json()).ip; }
-  catch (e) { r.ipSeen = 'err ' + e; }
-  r.webrtc = await new Promise(res => {
-    const ips = new Set(); let pc;
-    try { pc = new RTCPeerConnection({iceServers: [{urls: 'stun:stun.l.google.com:19302'}]}); }
-    catch (e) { return res(['err ' + e]); }
-    pc.createDataChannel('x');
-    pc.onicecandidate = ev => {
-      if (ev.candidate && ev.candidate.candidate) {
-        const m = ev.candidate.candidate.split(' ');
-        if (m[4]) ips.add(m[4] + ' ' + (m[7] || ''));
-      }
-    };
-    pc.createOffer().then(o => pc.setLocalDescription(o));
-    setTimeout(() => { try { pc.close(); } catch (e) {} res([...ips]); }, 4000);
-  });
-  return r;
+PROBES: dict[str, str] = {
+    "basic": r"""async () => {
+      const n = navigator;
+      return {userAgent: n.userAgent, platform: n.platform, hardwareConcurrency: n.hardwareConcurrency,
+        deviceMemory: n.deviceMemory, languages: n.languages, webdriver: n.webdriver,
+        timezone: Intl.DateTimeFormat().resolvedOptions().timeZone, tzOffset: new Date().getTimezoneOffset(),
+        screen: [screen.width, screen.height, screen.colorDepth, devicePixelRatio]};
+    }""",
+    "uaData": r"""async () => {
+      const n = navigator;
+      const h = await n.userAgentData.getHighEntropyValues(['platform','platformVersion','fullVersionList','architecture']);
+      return {uaData: {brands: n.userAgentData.brands.map(b => b.brand + ' ' + b.version),
+        platform: h.platform, platformVersion: h.platformVersion, architecture: h.architecture,
+        fullVersionList: h.fullVersionList.map(b => b.brand + ' ' + b.version)}};
+    }""",
+    "canvas": r"""async () => {
+      const c = document.createElement('canvas'); c.width = 280; c.height = 60;
+      const x = c.getContext('2d');
+      x.textBaseline = 'top'; x.font = '16px Arial';
+      x.fillStyle = '#f60'; x.fillRect(100, 1, 62, 20);
+      x.fillStyle = '#069'; x.fillText('xlauncher ✓ 1.0 <canvas>', 2, 15);
+      x.fillStyle = 'rgba(102,204,0,0.7)'; x.fillText('xlauncher ✓ 1.0 <canvas>', 4, 17);
+      const d = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(c.toDataURL()));
+      return {canvas: [...new Uint8Array(d)].map(v => v.toString(16).padStart(2, '0')).join('').slice(0, 16)};
+    }""",
+    "webgl": r"""async () => {
+      const gl = document.createElement('canvas').getContext('webgl');
+      if (!gl) return {webglRenderer: 'webgl недоступен'};
+      const ext = gl.getExtension('WEBGL_debug_renderer_info');
+      return {webglVendor: gl.getParameter(ext.UNMASKED_VENDOR_WEBGL),
+              webglRenderer: gl.getParameter(ext.UNMASKED_RENDERER_WEBGL)};
+    }""",
+    "audio": r"""async () => {
+      const ctx = new OfflineAudioContext(1, 44100, 44100);
+      const o = ctx.createOscillator(); o.type = 'triangle'; o.frequency.value = 10000;
+      const comp = ctx.createDynamicsCompressor();
+      o.connect(comp); comp.connect(ctx.destination); o.start(0);
+      const buf = await ctx.startRendering();
+      let s = 0; for (const v of buf.getChannelData(0).slice(4500, 5000)) s += Math.abs(v);
+      return {audio: s.toString()};
+    }""",
+    "ipSeen": r"""async () => ({ipSeen: (await (await fetch('https://api.ipify.org?format=json')).json()).ip})""",
+    "webrtc": r"""async () => ({webrtc: await new Promise(res => {
+      const ips = new Set();
+      const pc = new RTCPeerConnection({iceServers: [{urls: 'stun:stun.l.google.com:19302'}]});
+      pc.createDataChannel('x');
+      pc.onicecandidate = ev => {
+        if (ev.candidate && ev.candidate.candidate) {
+          const m = ev.candidate.candidate.split(' ');
+          if (m[4]) ips.add(m[4] + ' ' + (m[7] || ''));
+        }
+      };
+      pc.createOffer().then(o => pc.setLocalDescription(o));
+      setTimeout(() => { try { pc.close(); } catch (e) {} res([...ips]); }, 4000);
+    })})""",
 }
-"""
 
 
 # ---------------------------------------------------------------- утилиты
@@ -372,13 +360,34 @@ async def run_session(exe: Path, prof: Profile, pw, *, collect: bool = True, set
         ctx = browser.contexts[0]
         page = ctx.pages[0] if ctx.pages else await ctx.new_page()
         await page.goto("https://example.com/", wait_until="load", timeout=45000)
-        if collect:
-            res["fp"] = await page.evaluate(COLLECT_JS)
         if set_cookie:
             await page.evaluate(f"document.cookie = 'xl_test={set_cookie}; max-age=31536000; path=/'")
+            res["cookie_set"] = await page.evaluate("document.cookie")
         if read_cookie:
             cookies = await ctx.cookies("https://example.com")
             res["cookie"] = next((c["value"] for c in cookies if c["name"] == "xl_test"), None)
+        if collect:
+            fp: dict = {}
+            crashed: list[str] = []
+            for name, js in PROBES.items():
+                pg = await ctx.new_page()
+                try:
+                    await pg.goto("https://example.com/", wait_until="load", timeout=45000)
+                    fp.update(await asyncio.wait_for(pg.evaluate(js), 30))
+                except Exception as e:  # noqa: BLE001
+                    msg = str(e)
+                    if "crash" in msg.lower():
+                        crashed.append(name)
+                        fp[name] = "ВКЛАДКА УПАЛА"
+                    else:
+                        fp[name] = f"err {type(e).__name__}: {msg[:200]}"
+                finally:
+                    try:
+                        await pg.close()
+                    except Exception:  # noqa: BLE001
+                        pass
+            res["fp"] = fp
+            res["crashed_probes"] = crashed
         cdp = await browser.new_browser_cdp_session()
         try:
             await cdp.send("Browser.close")
@@ -605,7 +614,9 @@ def write_report(report: dict) -> None:
                 leak.append(f"- {name}: **УТЕЧКА реального IP**")
             else:
                 leak.append(f"- {name}: реальный IP не виден (сайт видит {fp.get('ipSeen')})")
-        lines += ["## Выводы по отпечатку", "", *checks, "", "## Утечки", "", *leak, ""]
+        crashes = [f"- {n}: {', '.join(v.get('crashed_probes') or []) or 'нет'}" for n, v in fps.items()]
+        lines += ["## Выводы по отпечатку", "", *checks, "", "## Падения вкладок по пробам", "", *crashes, "",
+                  "## Утечки", "", *leak, ""]
     tr = report.get("transfer")
     if tr:
         lines += ["## Перенос профиля", "", "```", json.dumps(tr, ensure_ascii=False, indent=2), "```", ""]
