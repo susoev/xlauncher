@@ -13,6 +13,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
 import subprocess
@@ -186,8 +187,25 @@ async def run(pid: str, confirm_country: bool, agent: bool = False) -> int:
         next_beat = time.monotonic() + runstate.HEARTBEAT_S
         key_saved = False
         stop_reason = "браузер закрыт"
+        warm_task: asyncio.Task | None = None
+        warm_stop = asyncio.Event()
         while proc.poll() is None:
             await asyncio.sleep(1)
+            wf = runstate.warmup_file(pid)
+            if wf.exists():
+                try:
+                    req = json.loads(wf.read_text(encoding="utf-8"))
+                except ValueError:
+                    req = {}
+                wf.unlink(missing_ok=True)
+                if req.get("action") == "stop":
+                    warm_stop.set()
+                elif req.get("action") == "start" and (warm_task is None or warm_task.done()):
+                    if not cdp_port:
+                        state(warmup={"status": "error", "error": "профиль запущен без доступа агента"})
+                    else:
+                        warm_stop = asyncio.Event()
+                        warm_task = asyncio.create_task(_warmup(p, pid, cdp_port, req, warm_stop, state))
             if runstate.stop_file(pid).exists():
                 runstate.stop_file(pid).unlink(missing_ok=True)
                 state(status="stopping")
@@ -209,6 +227,9 @@ async def run(pid: str, confirm_country: bool, agent: bool = False) -> int:
             if now >= next_beat:
                 next_beat = now + runstate.HEARTBEAT_S
                 state()
+        if warm_task and not warm_task.done():
+            warm_stop.set()
+            warm_task.cancel()
         if sys.platform == "win32" and not key_saved:
             portability.save_key(p.dir)
         profiles.append_launch_log(p, stop_reason)
@@ -216,6 +237,29 @@ async def run(pid: str, confirm_country: bool, agent: bool = False) -> int:
         return EXIT_OK
     finally:
         await fwd.stop()
+
+
+async def _warmup(p, pid: str, port: int, req: dict, stop: asyncio.Event, state) -> None:
+    from .core import warmup
+
+    sites = warmup.pick_sites(int(req.get("count") or 10), bool(req.get("include_yandex")), req.get("only"))
+    engine = req.get("engine") if req.get("engine") in warmup.SEARCH else "google"
+    if not sites:
+        state(warmup={"status": "error", "error": "в списке нет подходящих сайтов"})
+        return
+    profiles.append_launch_log(p, f"прогрев: старт\t{len(sites)} сайтов через {engine}")
+    runner = warmup.Runner(port, lambda st: state(warmup=st), stop,
+                           lambda line: profiles.append_launch_log(p, line))
+    try:
+        res = await runner.run(sites, engine)
+        ok = sum(r.get("result") == "ok" for r in res["results"])
+        cap = sum(r.get("result") == "captcha" for r in res["results"])
+        profiles.append_launch_log(p, f"прогрев: {res['status']}\t{ok} ок, {cap} капч из {len(res['results'])}")
+    except asyncio.CancelledError:
+        pass
+    except Exception as e:  # noqa: BLE001
+        log.exception("прогрев %s", pid)
+        state(warmup={"status": "error", "error": f"{type(e).__name__}: {e}"})
 
 
 async def monitor_ip(p, pid: str, fwd: Forwarder, lookup, state) -> None:

@@ -346,15 +346,37 @@ function renderDetail() {
       ${log.length ? `<ul class="timeline log">${log.slice(0, 15).map(r => `<li><span class="num muted">${esc(r.time)}</span><span>${esc(r.event)}
         ${r.details.filter(Boolean).length ? `<span class="details small muted num">${esc(r.details.filter(Boolean).join('   '))}</span>` : ''}</span></li>`).join('')}</ul>`
         : '<div class="faint">Профиль ещё не запускался</div>'}</section>
+    ${warmupSection(p)}
     ${p.notes ? `<section><h2>Заметки</h2><div class="notes">${esc(p.notes)}</div></section>` : ''}
     ${(p.start_urls || []).length ? `<section><h2>Открывать при запуске</h2><div class="small">${p.start_urls.map(esc).join('<br>')}</div></section>` : ''}
     <div class="tools">
       <button onclick="openForm('${p.id}')" ${v.active ? 'disabled title="Сначала останови профиль"' : ''}>Изменить</button>
       <button onclick="cloneP('${p.id}')" ${p.duplicate ? 'disabled' : ''}>Клонировать</button>
+      <button onclick="startWarmup('${p.id}')" ${p.duplicate || !p.proxy_masked || ((st.warmup || {}).status === 'running' && st.status === 'running') ? 'disabled' : ''}>Прогреть</button>
       <button onclick="api('POST','/api/profiles/${p.id}/open-folder').catch(e => toast(e.message))">Открыть папку</button>
       <span class="spacer"></span>
       <button class="danger" onclick="delP('${p.id}')" ${v.active ? 'disabled title="Сначала останови профиль"' : ''}>Удалить</button>
     </div></div>`);
+}
+function warmupSection(p) {
+  const st = p.state || {}, w = st.warmup;
+  if (!w || st.status !== 'running') return '';
+  const R = {ok: 'пройден', captcha: 'капча', error: 'ошибка'};
+  const head = w.status === 'running' ? `идёт: ${w.done} из ${w.total}${w.current ? ', сейчас ' + esc(w.current) : ''}`
+    : w.status === 'done' ? `завершён: ${w.done} из ${w.total}` : w.status === 'stopped' ? 'остановлен' : esc(w.error || w.status);
+  return `<section><h2>Прогрев<span class="aside">${head}</span>${w.status === 'running' ? `<button onclick="api('POST','/api/profiles/${p.id}/warmup/stop').then(load)">Остановить прогрев</button>` : ''}</h2>
+    ${w.total ? `<div class="progress"><i style="width:${Math.round(100 * w.done / w.total)}%"></i></div>` : ''}
+    ${(w.results || []).length ? `<ul class="timeline">${w.results.slice().reverse().map(r => `<li><span>${esc(r.name || r.domain)}</span>
+      <span class="${r.result === 'ok' ? 'ok' : 'bad'}">${esc(R[r.result] || r.result)}</span>
+      <span class="small muted">${esc(r.via || '')}${r.pages ? `, ${r.pages} стр.` : ''}${r.sec ? `, ${r.sec} с` : ''}${r.error ? ', ' + esc(r.error) : ''}</span></li>`).join('')}</ul>` : ''}
+  </section>`;
+}
+async function startWarmup(id) {
+  const n = await ask('Прогреть профиль', 'Лаунчер сам обойдёт сайты из списка через поиск Google, как обычный человек: откроет выдачу, перейдёт на сайт, почитает и полистает. Сайты Яндекса пропускаются (на IP из дата-центра они дают капчу). Сколько сайтов пройти? Каждый — около минуты.', {input: '10', ok: 'Начать прогрев'});
+  if (n === null) return;
+  try { const r = await api('POST', `/api/profiles/${id}/warmup`, {count: Number(n) || 10}); if (r.ok === false) toast(r.error); else toast('Прогрев начнётся, как только откроется браузер', 'ok', 5000); }
+  catch (e) { toast(e.message); }
+  load();
 }
 function select(id) {
   selected = id; renderList(); renderDetail(); loadDetailExtras(id, true);

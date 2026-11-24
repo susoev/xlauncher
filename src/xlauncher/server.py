@@ -104,6 +104,19 @@ def create_app(updater: "Updater | None") -> FastAPI:
     def browser_action(pid: str, action: str, body: dict = Body(default={})) -> dict:
         return service.browser_action(pid, action, body)
 
+    @app.post("/api/profiles/{pid}/warmup")
+    def warmup_start(pid: str, body: dict = Body(default={})) -> dict:
+        profiles.get(pid)
+        return service.warmup_start(pid, body)
+
+    @app.post("/api/profiles/{pid}/warmup/stop")
+    def warmup_stop(pid: str) -> dict:
+        return service.warmup_stop(pid)
+
+    @app.get("/api/warmup/sites")
+    def warmup_sites() -> dict:
+        return {"sites": service.warmup_sites()}
+
     @app.post("/api/profiles/{pid}/stop")
     def stop(pid: str) -> dict:
         return service.stop(pid)

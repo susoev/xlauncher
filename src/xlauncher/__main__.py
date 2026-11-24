@@ -86,7 +86,9 @@ def selftest() -> int:
     import websockets  # noqa: F401
 
     from . import mcp_server  # noqa: F401
-    from .core import browser  # noqa: F401
+    from .core import browser, warmup  # noqa: F401
+
+    assert len(warmup.load_sites()) > 10 and warmup.load_timing()["between_sites_sec"]
 
     fp = fingerprint.generate("RU")
     args = engine.build_args(data_dir=paths.root(), cache_dir=paths.root(), fingerprint=fp, proxy_port=1,

@@ -1,0 +1,643 @@
+{
+  "version": "1.1",
+  "source": "https://alid.in/warm-list.html (без Кинопоиска: капча на IP из дата-центра)",
+  "timing": {
+    "between_sites_sec": [
+      5,
+      20
+    ],
+    "page_load_timeout_sec": 30,
+    "after_load_sec": [
+      1,
+      3
+    ],
+    "scroll_pause_sec": [
+      1.5,
+      6
+    ],
+    "scroll_ticks": [
+      2,
+      6
+    ],
+    "scroll_tick_px": [
+      80,
+      140
+    ],
+    "scroll_up_chance": 0.12,
+    "reading_pause_chance": 0.2,
+    "reading_pause_sec": [
+      8,
+      15
+    ],
+    "internal_pages": [
+      1,
+      2
+    ],
+    "typing_delay_sec": [
+      0.05,
+      0.22
+    ]
+  },
+  "sites": [
+    {
+      "name": "2ГИС",
+      "domain": "2gis.ru",
+      "url": "https://2gis.ru/",
+      "category": "Справочники и агрегаторы",
+      "query": "2гис",
+      "dwell_sec": [
+        40,
+        60
+      ],
+      "actions": [
+        "select_city",
+        "search_category",
+        "open_company_cards",
+        "click_reviews_or_photos_tab"
+      ],
+      "yandex": false,
+      "enabled": true
+    },
+    {
+      "name": "Zoon",
+      "domain": "zoon.ru",
+      "url": "https://zoon.ru/",
+      "category": "Справочники и агрегаторы",
+      "query": "zoon отзывы",
+      "dwell_sec": [
+        35,
+        50
+      ],
+      "actions": [
+        "open_service_catalog",
+        "filter_by_rating",
+        "open_company_card",
+        "scroll_price_list"
+      ],
+      "yandex": false,
+      "enabled": true
+    },
+    {
+      "name": "ПроДокторов",
+      "domain": "prodoctorov.ru",
+      "url": "https://prodoctorov.ru/",
+      "category": "Справочники и агрегаторы",
+      "query": "продокторов",
+      "dwell_sec": [
+        35,
+        50
+      ],
+      "actions": [
+        "select_region",
+        "open_doctors_or_clinics",
+        "open_specialist_profiles",
+        "scroll_patient_reviews"
+      ],
+      "yandex": false,
+      "enabled": true
+    },
+    {
+      "name": "Banki.ru",
+      "domain": "banki.ru",
+      "url": "https://www.banki.ru/",
+      "category": "Финансы и страхование",
+      "query": "банки ру вклады",
+      "dwell_sec": [
+        40,
+        60
+      ],
+      "actions": [
+        "open_deposits_or_credits",
+        "scroll_bank_offers",
+        "open_news_article"
+      ],
+      "yandex": false,
+      "enabled": true
+    },
+    {
+      "name": "Sravni.ru",
+      "domain": "sravni.ru",
+      "url": "https://www.sravni.ru/",
+      "category": "Финансы и страхование",
+      "query": "сравни ру осаго",
+      "dwell_sec": [
+        35,
+        50
+      ],
+      "actions": [
+        "open_osago_calculator",
+        "interact_calculator_params_without_submit",
+        "scroll_page"
+      ],
+      "yandex": false,
+      "enabled": true
+    },
+    {
+      "name": "Кино-Театр.Ру",
+      "domain": "kino-teatr.ru",
+      "url": "https://www.kino-teatr.ru/",
+      "category": "Кино и медиа",
+      "query": "кино театр ру",
+      "dwell_sec": [
+        30,
+        45
+      ],
+      "actions": [
+        "open_movies_or_news",
+        "open_movie_card",
+        "click_actors_tab"
+      ],
+      "yandex": false,
+      "enabled": true
+    },
+    {
+      "name": "РБК",
+      "domain": "rbc.ru",
+      "url": "https://www.rbc.ru/",
+      "category": "Новости и СМИ",
+      "query": "рбк новости",
+      "dwell_sec": [
+        45,
+        70
+      ],
+      "actions": [
+        "scroll_main_feed",
+        "open_articles_different_rubrics",
+        "scroll_to_bottom"
+      ],
+      "yandex": false,
+      "enabled": true
+    },
+    {
+      "name": "Lenta.ru",
+      "domain": "lenta.ru",
+      "url": "https://lenta.ru/",
+      "category": "Новости и СМИ",
+      "query": "лента ру",
+      "dwell_sec": [
+        35,
+        50
+      ],
+      "actions": [
+        "open_news_from_main",
+        "smooth_scroll_article",
+        "scroll_related_news"
+      ],
+      "yandex": false,
+      "enabled": true
+    },
+    {
+      "name": "Коммерсантъ",
+      "domain": "kommersant.ru",
+      "url": "https://www.kommersant.ru/",
+      "category": "Новости и СМИ",
+      "query": "коммерсант",
+      "dwell_sec": [
+        40,
+        60
+      ],
+      "actions": [
+        "open_business_or_society",
+        "open_analytical_article",
+        "scroll_with_reading_pauses"
+      ],
+      "yandex": false,
+      "enabled": true
+    },
+    {
+      "name": "РИА Новости",
+      "domain": "ria.ru",
+      "url": "https://ria.ru/",
+      "category": "Новости и СМИ",
+      "query": "риа новости",
+      "dwell_sec": [
+        35,
+        50
+      ],
+      "actions": [
+        "scroll_main_page",
+        "open_news_items",
+        "click_tag_or_topic"
+      ],
+      "yandex": false,
+      "enabled": true
+    },
+    {
+      "name": "Pikabu",
+      "domain": "pikabu.ru",
+      "url": "https://pikabu.ru/",
+      "category": "Блоги, сообщества и UGC",
+      "query": "пикабу",
+      "dwell_sec": [
+        60,
+        90
+      ],
+      "actions": [
+        "scroll_hot_feed",
+        "expand_longpost",
+        "scroll_comments_branch"
+      ],
+      "yandex": false,
+      "enabled": true
+    },
+    {
+      "name": "Habr",
+      "domain": "habr.com",
+      "url": "https://habr.com/ru/",
+      "category": "Блоги, сообщества и UGC",
+      "query": "хабр",
+      "dwell_sec": [
+        60,
+        90
+      ],
+      "actions": [
+        "open_article",
+        "scroll_with_reading_pauses",
+        "scroll_to_comments"
+      ],
+      "yandex": false,
+      "enabled": true
+    },
+    {
+      "name": "VC.ru",
+      "domain": "vc.ru",
+      "url": "https://vc.ru/",
+      "category": "Блоги, сообщества и UGC",
+      "query": "vc ru",
+      "dwell_sec": [
+        50,
+        80
+      ],
+      "actions": [
+        "scroll_fresh_feed",
+        "open_business_or_marketing_case",
+        "scroll_comments"
+      ],
+      "yandex": false,
+      "enabled": true
+    },
+    {
+      "name": "Sports.ru",
+      "domain": "sports.ru",
+      "url": "https://www.sports.ru/",
+      "category": "Спорт",
+      "query": "спортс ру",
+      "dwell_sec": [
+        35,
+        50
+      ],
+      "actions": [
+        "open_football_or_hockey",
+        "open_news_or_match_center",
+        "scroll_feed"
+      ],
+      "yandex": false,
+      "enabled": true
+    },
+    {
+      "name": "DTF",
+      "domain": "dtf.ru",
+      "url": "https://dtf.ru/",
+      "category": "Блоги, сообщества и UGC",
+      "query": "dtf",
+      "dwell_sec": [
+        45,
+        70
+      ],
+      "actions": [
+        "open_popular_post",
+        "scroll_media_embeds",
+        "scroll_discussion"
+      ],
+      "yandex": false,
+      "enabled": true
+    },
+    {
+      "name": "Дзен",
+      "domain": "dzen.ru",
+      "url": "https://dzen.ru/",
+      "category": "Экосистема Яндекса",
+      "query": "дзен",
+      "dwell_sec": [
+        60,
+        90
+      ],
+      "actions": [
+        "scroll_recommendation_feed",
+        "open_articles_or_videos",
+        "dwell_on_content"
+      ],
+      "yandex": true,
+      "enabled": true
+    },
+    {
+      "name": "Яндекс Маркет",
+      "domain": "market.yandex.ru",
+      "url": "https://market.yandex.ru/",
+      "category": "Экосистема Яндекса",
+      "query": "яндекс маркет",
+      "dwell_sec": [
+        60,
+        90
+      ],
+      "actions": [
+        "search_product_query",
+        "apply_price_or_rating_filter",
+        "open_product_cards",
+        "browse_product_photos"
+      ],
+      "yandex": true,
+      "enabled": true
+    },
+    {
+      "name": "Ozon",
+      "domain": "ozon.ru",
+      "url": "https://www.ozon.ru/",
+      "category": "Маркетплейсы",
+      "query": "озон",
+      "dwell_sec": [
+        50,
+        80
+      ],
+      "actions": [
+        "open_catalog_category",
+        "open_product_cards",
+        "scroll_specs_and_reviews"
+      ],
+      "yandex": false,
+      "enabled": true
+    },
+    {
+      "name": "Wildberries",
+      "domain": "wildberries.ru",
+      "url": "https://www.wildberries.ru/",
+      "category": "Маркетплейсы",
+      "query": "вайлдберриз",
+      "dwell_sec": [
+        50,
+        80
+      ],
+      "actions": [
+        "open_hits_or_search",
+        "open_product_cards",
+        "browse_photo_gallery"
+      ],
+      "yandex": false,
+      "enabled": true
+    },
+    {
+      "name": "Авито",
+      "domain": "avito.ru",
+      "url": "https://www.avito.ru/",
+      "category": "Классифайды и объявления",
+      "query": "авито",
+      "dwell_sec": [
+        50,
+        80
+      ],
+      "actions": [
+        "select_region",
+        "open_category",
+        "open_listings_and_scroll_photos"
+      ],
+      "yandex": false,
+      "enabled": true
+    },
+    {
+      "name": "ВКонтакте",
+      "domain": "vk.com",
+      "url": "https://vk.com/",
+      "category": "Соцсети и порталы",
+      "query": "вконтакте",
+      "dwell_sec": [
+        30,
+        45
+      ],
+      "actions": [
+        "open_public_groups_without_login",
+        "scroll_wall_posts"
+      ],
+      "yandex": false,
+      "enabled": true
+    },
+    {
+      "name": "Mail.ru",
+      "domain": "mail.ru",
+      "url": "https://mail.ru/",
+      "category": "Порталы",
+      "query": "mail ru",
+      "dwell_sec": [
+        30,
+        45
+      ],
+      "actions": [
+        "scroll_main_portal",
+        "hover_weather_or_currency_widget",
+        "open_news_item"
+      ],
+      "yandex": false,
+      "enabled": true
+    },
+    {
+      "name": "Gismeteo",
+      "domain": "gismeteo.ru",
+      "url": "https://www.gismeteo.ru/",
+      "category": "Погода",
+      "query": "гисметео",
+      "dwell_sec": [
+        25,
+        40
+      ],
+      "actions": [
+        "select_city",
+        "switch_forecast_tabs",
+        "hover_weather_charts"
+      ],
+      "yandex": false,
+      "enabled": true
+    },
+    {
+      "name": "Top.Mail.Ru",
+      "domain": "top.mail.ru",
+      "url": "https://top.mail.ru/",
+      "category": "Счетчики и каталоги",
+      "query": "топ мейл ру рейтинг",
+      "dwell_sec": [
+        25,
+        35
+      ],
+      "actions": [
+        "open_site_rating",
+        "select_category",
+        "click_external_site_links"
+      ],
+      "yandex": false,
+      "enabled": true
+    },
+    {
+      "name": "Rutube",
+      "domain": "rutube.ru",
+      "url": "https://rutube.ru/",
+      "category": "Видео",
+      "query": "рутуб",
+      "dwell_sec": [
+        60,
+        90
+      ],
+      "actions": [
+        "open_trending_video",
+        "play_video_30_45_sec",
+        "scroll_related_videos"
+      ],
+      "yandex": false,
+      "enabled": true
+    },
+    {
+      "name": "Госуслуги",
+      "domain": "gosuslugi.ru",
+      "url": "https://www.gosuslugi.ru/",
+      "category": "Государственные порталы",
+      "query": "госуслуги",
+      "dwell_sec": [
+        35,
+        55
+      ],
+      "actions": [
+        "browse_public_catalog_without_login",
+        "open_life_situations_or_help_article",
+        "scroll_faq"
+      ],
+      "yandex": false,
+      "enabled": true
+    },
+    {
+      "name": "ФНС России",
+      "domain": "nalog.gov.ru",
+      "url": "https://www.nalog.gov.ru/",
+      "category": "Государственные порталы",
+      "query": "налог гов ру",
+      "dwell_sec": [
+        35,
+        55
+      ],
+      "actions": [
+        "select_region",
+        "open_individuals_or_business_section",
+        "open_public_service_info_page"
+      ],
+      "yandex": false,
+      "enabled": true
+    },
+    {
+      "name": "РЖД",
+      "domain": "rzd.ru",
+      "url": "https://www.rzd.ru/",
+      "category": "Транспорт и инфраструктура",
+      "query": "ржд",
+      "dwell_sec": [
+        45,
+        70
+      ],
+      "actions": [
+        "enter_departure_and_arrival_cities",
+        "select_future_date",
+        "view_train_schedule_without_booking"
+      ],
+      "yandex": false,
+      "enabled": true
+    },
+    {
+      "name": "Почта России",
+      "domain": "pochta.ru",
+      "url": "https://www.pochta.ru/",
+      "category": "Транспорт и инфраструктура",
+      "query": "почта россии",
+      "dwell_sec": [
+        30,
+        50
+      ],
+      "actions": [
+        "open_delivery_calculator_or_offices_map",
+        "enter_city_or_index",
+        "scroll_tariffs"
+      ],
+      "yandex": false,
+      "enabled": true
+    },
+    {
+      "name": "hh.ru",
+      "domain": "hh.ru",
+      "url": "https://hh.ru/",
+      "category": "Работа и вакансии",
+      "query": "хх ру вакансии",
+      "dwell_sec": [
+        45,
+        70
+      ],
+      "actions": [
+        "select_city",
+        "search_vacancies",
+        "open_2_vacancy_cards",
+        "scroll_requirements"
+      ],
+      "yandex": false,
+      "enabled": true
+    },
+    {
+      "name": "Циан",
+      "domain": "cian.ru",
+      "url": "https://www.cian.ru/",
+      "category": "Недвижимость",
+      "query": "циан",
+      "dwell_sec": [
+        50,
+        80
+      ],
+      "actions": [
+        "select_region",
+        "open_buy_or_rent_apartments",
+        "open_2_listings",
+        "browse_photos_and_map"
+      ],
+      "yandex": false,
+      "enabled": true
+    },
+    {
+      "name": "Дром",
+      "domain": "drom.ru",
+      "url": "https://www.drom.ru/",
+      "category": "Авто",
+      "query": "дром",
+      "dwell_sec": [
+        45,
+        75
+      ],
+      "actions": [
+        "select_region",
+        "filter_car_brand",
+        "open_2_car_listings",
+        "scroll_specs_and_reviews"
+      ],
+      "yandex": false,
+      "enabled": true
+    },
+    {
+      "name": "КонсультантПлюс",
+      "domain": "consultant.ru",
+      "url": "https://www.consultant.ru/",
+      "category": "Правовые и справочные системы",
+      "query": "консультант плюс",
+      "dwell_sec": [
+        35,
+        55
+      ],
+      "actions": [
+        "open_codes_or_news_section",
+        "open_law_article",
+        "scroll_document_text"
+      ],
+      "yandex": false,
+      "enabled": true
+    }
+  ]
+}

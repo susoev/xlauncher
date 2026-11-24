@@ -222,6 +222,40 @@ class Session:
         self._scale = ratio if 0.3 < ratio < 4 else 1.0
         return self._scale
 
+    async def find(self, js_array_expr: str) -> list[str]:
+        """Выполняет выражение, возвращающее массив элементов, в изолированном мире → objectId элементов."""
+        arr = await self.eval(js_array_expr, by_value=False)
+        if not arr.get("objectId"):
+            return []
+        props = await self.send("Runtime.getProperties", {"objectId": arr["objectId"], "ownProperties": True})
+        return [p["value"]["objectId"] for p in props["result"]
+                if p["name"].isdigit() and "objectId" in p.get("value", {})]
+
+    async def click_object(self, oid: str) -> bool:
+        """Клик мышью по элементу (с плавным подводом курсора). False — элемент невидим."""
+        c = await self.call_on(oid, CENTER_FN)
+        if c["w"] < 1 or c["h"] < 1:
+            return False
+        await asyncio.sleep(0.2)
+        c = await self.call_on(oid, CENTER_FN)
+        await self.mouse_path(c["x"], c["y"])
+        await self.mouse_click(c["x"], c["y"])
+        return True
+
+    async def mouse_path(self, x: float, y: float, steps: int = 6) -> None:
+        """Плавное движение мыши к точке — как у человека, а не телепортация."""
+        import random
+
+        k = await self.scale()
+        sx, sy = getattr(self, "_mouse", (x - random.uniform(80, 260), y + random.uniform(-120, 120)))
+        for i in range(1, steps + 1):
+            t = i / steps
+            px = sx + (x - sx) * t + random.uniform(-3, 3)
+            py = sy + (y - sy) * t + random.uniform(-3, 3)
+            await self.send("Input.dispatchMouseEvent", {"type": "mouseMoved", "x": px / k, "y": py / k})
+            await asyncio.sleep(random.uniform(0.01, 0.04))
+        self._mouse = (x, y)
+
     async def mouse_click(self, x: float, y: float) -> None:
         k = await self.scale()
         x, y = x / k, y / k

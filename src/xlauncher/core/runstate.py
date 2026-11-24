@@ -33,6 +33,15 @@ def stop_file(pid: str) -> Path:
     return paths.run_dir() / f"profile-{pid}.stop"
 
 
+def warmup_file(pid: str) -> Path:
+    return paths.run_dir() / f"profile-{pid}.warmup.json"
+
+
+def request_warmup(pid: str, params: dict) -> None:
+    paths.run_dir().mkdir(parents=True, exist_ok=True)
+    paths.write_atomic(warmup_file(pid), json.dumps(params, ensure_ascii=False))
+
+
 def pid_alive(pid: int | None) -> bool:
     if not pid:
         return False
@@ -94,6 +103,7 @@ def is_active(pid: str) -> bool:
 def clear(pid: str) -> None:
     state_file(pid).unlink(missing_ok=True)
     stop_file(pid).unlink(missing_ok=True)
+    warmup_file(pid).unlink(missing_ok=True)
 
 
 def request_stop(pid: str) -> None:

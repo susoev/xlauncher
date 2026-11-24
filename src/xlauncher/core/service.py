@@ -231,3 +231,34 @@ def browser_action(pid: str, action: str, args: dict) -> dict:
     detail = {k: (v if k != "text" else f"{len(str(v))} симв.") for k, v in args.items() if k != "tab"}
     profiles.append_launch_log(p, f"агент: {action}\t{json.dumps(detail, ensure_ascii=False)[:200]}")
     return res
+
+
+# ---------------------------------------------------------------- прогрев
+
+
+def warmup_start(pid: str, params: dict) -> dict:
+    """Прогрев: если профиль не запущен — запускает его с доступом агента; раннер подхватит запрос."""
+    st = runstate.read(pid) or {}
+    if st.get("status") == "running" and not st.get("cdp_port"):
+        return {"ok": False, "error": "профиль открыт без доступа агента — закрой его, прогрев запустит его сам"}
+    if (st.get("warmup") or {}).get("status") == "running" and st.get("status") == "running":
+        return {"ok": False, "error": "прогрев уже идёт"}
+    req = {"action": "start", "count": int(params.get("count") or 10), "engine": params.get("engine") or "google",
+           "include_yandex": bool(params.get("include_yandex")), "only": params.get("only")}
+    if not runstate.is_active(pid):
+        r = start(pid, bool(params.get("confirm_country")), agent=True)
+        if not r.get("ok"):
+            return r
+    runstate.request_warmup(pid, req)
+    return {"ok": True, "queued": req}
+
+
+def warmup_stop(pid: str) -> dict:
+    runstate.request_warmup(pid, {"action": "stop"})
+    return {"ok": True}
+
+
+def warmup_sites() -> list[dict]:
+    from . import warmup
+
+    return warmup.load_sites()

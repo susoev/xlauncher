@@ -26,6 +26,9 @@ INSTRUCTIONS = """Управление профилями браузера XLaun
 1. list_profiles — найти профиль (по имени, клиенту или id).
 2. start_profile — запустить его с доступом агента. Если профиль уже открыт пользователем без доступа агента,
    спроси пользователя, можно ли перезапустить (restart=true).
+Прогрев профиля (накопить историю и куки перед регистрацией): warmup_profile — работает сам, следи через
+warmup_status. Не прогревай вручную через browser_* — это долго и дорого.
+
 3. browser_snapshot — прочитать страницу: текст и список элементов со ссылками вида [e123].
 4. browser_click / browser_type / browser_press_key / browser_scroll — действовать по ссылкам из последнего снимка.
    После действий, которые меняют страницу, делай новый снимок: ссылки на элементы устаревают.
@@ -213,6 +216,47 @@ def ip_history(profile: str) -> str:
     rows = api("GET", f"/api/profiles/{p['id']}/ip-history")["history"]
     return "\n".join(f"{r['time']}  {r['ip']}  {r['country']} {r['city']}  {r['source']} {r['flag']}".rstrip()
                      for r in rows) or "История пуста"
+
+
+# ---------------------------------------------------------------- прогрев
+
+
+@mcp.tool()
+def warmup_profile(profile: str, count: int = 10, engine: str = "google", include_yandex: bool = False) -> str:
+    """Запускает встроенный прогрев: обход count сайтов из списка через поиск (engine: google или yandex).
+
+    Работает сам, без участия агента: поиск → клик по выдаче → чтение сайта с паузами → следующий.
+    Если профиль не запущен — запустит его. Сайты Яндекса (include_yandex) на IP из дата-центра обычно дают капчу.
+    Прогресс — warmup_status. Займёт примерно count × 1–1,5 минуты.
+    """
+    p = _resolve(profile)
+    r = api("POST", f"/api/profiles/{p['id']}/warmup",
+            {"count": count, "engine": engine, "include_yandex": include_yandex})
+    if r.get("ok") is False:
+        return f"Не запущен: {r.get('error')}"
+    return f"Прогрев запущен: {count} сайтов через {engine}. Проверяй warmup_status раз в несколько минут."
+
+
+@mcp.tool()
+def warmup_status(profile: str) -> str:
+    """Прогресс и итоги прогрева: сколько сайтов пройдено, где были капчи."""
+    p = api("GET", f"/api/profiles/{_resolve(profile)['id']}")
+    w = (p.get("state") or {}).get("warmup")
+    if not w:
+        return "Прогрев не запускался в этом сеансе браузера"
+    lines = [f"статус: {w.get('status')}, пройдено {w.get('done')} из {w.get('total')}"
+             + (f", сейчас {w['current']}" if w.get("current") else "")]
+    for r in w.get("results", []):
+        lines.append(f"  {r['domain']}: {r.get('result')} ({r.get('via', '')}, {r.get('pages', 0)} стр., {r.get('sec', 0)} с)"
+                     + (f" — {r['error']}" if r.get("error") else ""))
+    return "\n".join(lines)
+
+
+@mcp.tool()
+def warmup_stop(profile: str) -> str:
+    """Останавливает прогрев (браузер остаётся открытым)."""
+    api("POST", f"/api/profiles/{_resolve(profile)['id']}/warmup/stop")
+    return "Остановка запрошена"
 
 
 # ---------------------------------------------------------------- браузер
