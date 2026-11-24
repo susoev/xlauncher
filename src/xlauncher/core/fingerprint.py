@@ -49,6 +49,7 @@ def generate(country: str | None = None, locale: str | None = None) -> dict:
 def regenerate_identity(fp: dict) -> dict:
     """Новый seed и ядра при сохранении языка и часового пояса (для клонов)."""
     new = dict(fp)
+    new.pop("probe", None)  # проба относилась к старому seed
     new["seed"] = secrets.randbits(32) or 1
     new["hardware_concurrency"] = secrets.choice(CORES)
     return new

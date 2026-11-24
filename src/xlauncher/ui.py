@@ -46,6 +46,7 @@ INDEX_HTML = r"""<!doctype html>
   <h1>xlauncher</h1><span id="ver" class="mut small"></span><span class="sp"></span>
   <span id="upd" class="mut small"></span>
   <button onclick="checkUpdates()" title="Проверить обновления сейчас">⟳</button>
+  <button onclick="startAudit()" title="Проверить, не совпадают ли отпечатки профилей">Проверить отпечатки</button>
   <button class="pri" onclick="openForm()">+ Новый профиль</button>
 </header>
 <main>
@@ -87,7 +88,7 @@ async function api(method, url, body) {
   if (!r.ok) throw new Error(data.error || data.detail || ('HTTP ' + r.status));
   return data;
 }
-let editing = null, profilesCache = [];
+let editing = null, profilesCache = [], auditDismissed = false;
 
 // Свои уведомления и диалоги вместо alert/confirm/prompt: системные окна во встроенном
 // браузере модальны и могут открыться невидимыми, блокируя окно лаунчера.
@@ -162,6 +163,20 @@ async function load() {
       else
         b += `<div class="banner warn">Браузер ${esc(e.version)} ещё не скачан (~190 МБ). <button class="pri" onclick="api('POST','/api/engine/install').then(load)">Скачать</button></div>`;
     }
+    const au = s.audit || {};
+    if (au.status === 'running')
+      b += `<div class="banner">Проверяю отпечатки: ${au.done} / ${au.total || '…'}</div>`;
+    else if (au.status === 'error')
+      b += `<div class="banner err">Проверка отпечатков: ${esc(au.error)}</div>`;
+    else if (au.status === 'done' && !auditDismissed) {
+      const issues = au.collisions.map(c => `${c.kind === 'audio' ? 'аудио' : 'canvas'}: ${c.profiles.map(esc).join(', ')}`);
+      if (au.baseline_hits.length) issues.push('как у браузера без подмены: ' + au.baseline_hits.map(esc).join(', '));
+      b += issues.length
+        ? `<div class="banner warn"><b>Найдены совпадения отпечатков</b> (проверено ${au.checked}):<br>${issues.join('<br>')}<br>
+           <span class="small mut">Отпечатки уже используемых профилей лаунчер не меняет. Если в профиле ещё не входили в аккаунты — проще удалить его и создать заново.</span>
+           <button onclick="auditDismissed=true;load()">Скрыть</button></div>`
+        : `<div class="banner">✓ Отпечатки всех ${au.checked} профилей различаются. <button onclick="auditDismissed=true;load()">ОК</button></div>`;
+    }
     for (const d of l.duplicates)
       b += `<div class="banner err"><b>Найдены копии одного профиля:</b> папки ${d.slugs.map(x => '<code>' + esc(x) + '</code>').join(', ')}.<br>
         Если это перенос — удали лишнюю папку в <code>profiles\\</code>. Если копию сделали, чтобы получить новый профиль, — нажми у неё «Это новый профиль»: ей выдадут новый отпечаток и очистят куки.<br>
@@ -182,6 +197,17 @@ async function load() {
 }
 let lastOk = 0;
 
+async function startAudit() {
+  auditDismissed = false;
+  try { await api('POST', '/api/fingerprints/audit'); toast('Проверяю отпечатки — это пара секунд на профиль', 'ok', 4000); } catch (e) { toast(e.message); }
+  load();
+}
+function uniqueToast(u) {
+  if (!u) return;
+  if (!u.checked) toast('Отпечаток не проверен: ' + u.reason, 'err', 9000);
+  else if (u.unique) toast(`Отпечаток уникален (сравнён с ${u.compared_with} проф., попыток: ${u.tried})`, 'ok', 5000);
+  else toast('Полностью уникальный отпечаток подобрать не удалось: ' + u.issues.join('; '), 'err', 12000);
+}
 async function checkUpdates() {
   try { await api('POST', '/api/update/check'); toast('Проверяю обновления… Если найдётся новая версия, окно перезапустится само.', 'ok', 5000); }
   catch (e) { toast(e.message); }
@@ -193,14 +219,15 @@ async function act(id, what, body) {
 }
 async function newIdentity(slug) {
   if (!await ask('Это новый профиль?', `Профилю «${slug}» будет выдан новый отпечаток, куки и история будут удалены.`, {ok: 'Выдать новый отпечаток', danger: true})) return;
-  try { await api('POST', `/api/duplicates/${encodeURIComponent(slug)}/new-identity`); toast('Готово', 'ok'); } catch (e) { toast(e.message); }
+  try { const r = await api('POST', `/api/duplicates/${encodeURIComponent(slug)}/new-identity`); uniqueToast(r.uniqueness); } catch (e) { toast(e.message); }
   load();
 }
 async function cloneP(id) {
   const p = profilesCache.find(x => x.id === id);
   const name = await ask('Клонировать профиль', 'Копия получит новый отпечаток и не унаследует куки и историю. Расширения и закладки сохранятся.', {input: (p?.name || '') + ' (копия)', ok: 'Клонировать'});
   if (name === null) return;
-  try { await api('POST', `/api/profiles/${id}/clone`, {name}); toast('Клон создан', 'ok'); } catch (e) { toast(e.message); }
+  toast('Создаю клон и подбираю отпечаток…', 'ok', 4000);
+  try { const r = await api('POST', `/api/profiles/${id}/clone`, {name}); uniqueToast(r.uniqueness); } catch (e) { toast(e.message); }
   load();
 }
 const nameOf = id => (profilesCache.find(x => x.id === id) || {}).name || '';
@@ -247,12 +274,14 @@ async function saveForm() {
   try {
     if (editing) await api('PATCH', `/api/profiles/${editing}`, body);
     else {
+      $('f_save').textContent = 'Подбираю отпечаток…';
       const r = await api('POST', '/api/profiles', body);
       if (r.check && !r.check.ok) toast('Профиль создан, но прокси не прошёл проверку: ' + r.check.error, 'err', 12000);
+      uniqueToast(r.uniqueness);
     }
     form.close();
   } catch (e) { toast(e.message); }
-  $('f_save').disabled = false; load();
+  $('f_save').disabled = false; $('f_save').textContent = editing ? 'Сохранить' : 'Создать'; load();
 }
 load(); setInterval(load, 2000);
 setInterval(() => fetch('/api/ui-ping', {method: 'POST', cache: 'no-store'}).catch(() => {}), 5000);

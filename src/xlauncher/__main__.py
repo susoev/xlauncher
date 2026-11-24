@@ -82,7 +82,8 @@ def selftest() -> int:
     body = json.loads(urllib.request.urlopen(f"http://127.0.0.1:{port}/api/health", timeout=5).read())
     assert body["ok"] and body["version"] == __version__, body
     from . import runner, ui  # noqa: F401
-    from .core import engine, fingerprint, portability, proxy, service  # noqa: F401
+    from .core import engine, fingerprint, portability, probe, proxy, service, uniqueness  # noqa: F401
+    import websockets  # noqa: F401
 
     fp = fingerprint.generate("RU")
     args = engine.build_args(data_dir=paths.root(), cache_dir=paths.root(), fingerprint=fp, proxy_port=1,

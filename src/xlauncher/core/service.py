@@ -9,7 +9,7 @@ import sys
 from pathlib import Path
 
 from .. import settings
-from . import engine, iphistory, profiles, proxy, runstate
+from . import engine, fingerprint, iphistory, profiles, proxy, runstate, uniqueness
 
 
 def _run_async(coro):
@@ -62,12 +62,29 @@ def create_profile(body: dict) -> dict:
         check = check_proxy(body["proxy"])
         if check.get("ok"):
             country = check["geo"].get("country")
+    fp, unique = uniqueness.pick(fingerprint.generate(country, body.get("locale")))
     p = profiles.create(body.get("name") or "Профиль", group=body.get("group", ""), proxy=body.get("proxy", ""),
-                        start_urls=body.get("start_urls") or [], notes=body.get("notes", ""), country=country,
-                        locale=body.get("locale"))
+                        start_urls=body.get("start_urls") or [], notes=body.get("notes", ""), fp=fp)
     if check and check.get("ok"):
         iphistory.record(p.dir, check["ip"], check["geo"], "create")
-    return {"profile": profile_view(p), "check": check}
+    return {"profile": profile_view(p), "check": check, "uniqueness": unique}
+
+
+def clone_profile(pid: str, name: str | None) -> dict:
+    p = profiles.clone(pid, name)
+    report = uniqueness.ensure_unique(p)
+    return {"profile": profile_view(p), "uniqueness": report}
+
+
+def new_identity(slug: str) -> dict:
+    p = profiles.new_identity(profiles.get_by_slug(slug))
+    report = uniqueness.ensure_unique(p)
+    return {"profile": profile_view(p), "uniqueness": report}
+
+
+def audit_start() -> dict:
+    uniqueness.auditor.start()
+    return uniqueness.auditor.state
 
 
 def _runner_cmd(pid: str, confirm_country: bool) -> tuple[list[str], dict, Path | None]:

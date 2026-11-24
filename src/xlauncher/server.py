@@ -45,6 +45,7 @@ def create_app(updater: "Updater | None") -> FastAPI:
             "root": str(paths.root()),
             "updater": updater.status() if updater else {"state": "выключено (запуск из исходников)"},
             "engine": service.engine_status(),
+            "audit": service.uniqueness.auditor.state,
         }
 
     @app.post("/api/ui-ping")
@@ -92,7 +93,7 @@ def create_app(updater: "Updater | None") -> FastAPI:
 
     @app.post("/api/profiles/{pid}/clone")
     def clone_profile(pid: str, body: dict = Body(default={})) -> dict:
-        return service.profile_view(profiles.clone(pid, body.get("name")))
+        return service.clone_profile(pid, body.get("name"))
 
     @app.post("/api/profiles/{pid}/start")
     def start(pid: str, body: dict = Body(default={})) -> dict:
@@ -116,7 +117,11 @@ def create_app(updater: "Updater | None") -> FastAPI:
 
     @app.post("/api/duplicates/{slug}/new-identity")
     def dup_new_identity(slug: str) -> dict:
-        return service.profile_view(profiles.new_identity(profiles.get_by_slug(slug)))
+        return service.new_identity(slug)
+
+    @app.post("/api/fingerprints/audit")
+    def audit() -> dict:
+        return service.audit_start()
 
     @app.get("/", response_class=HTMLResponse)
     def index() -> str:

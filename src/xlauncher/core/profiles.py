@@ -151,7 +151,8 @@ def _unique_dir(name: str) -> Path:
 
 
 def create(name: str, *, group: str = "", proxy: str = "", start_urls: list[str] | None = None,
-           notes: str = "", country: str | None = None, locale: str | None = None) -> Profile:
+           notes: str = "", country: str | None = None, locale: str | None = None,
+           fp: dict | None = None) -> Profile:
     d = _unique_dir(name)
     (d / "data").mkdir(parents=True)
     p = Profile(d, migrate({
@@ -163,7 +164,7 @@ def create(name: str, *, group: str = "", proxy: str = "", start_urls: list[str]
         "tags": [],
         "created": datetime.now().astimezone().isoformat(timespec="seconds"),
         "proxy": proxy.strip(),
-        "fingerprint": fingerprint.generate(country, locale),
+        "fingerprint": fp or fingerprint.generate(country, locale),
         "start_urls": [u.strip() for u in (start_urls or []) if u.strip()],
         "engine": {},
         "agent_access": False,

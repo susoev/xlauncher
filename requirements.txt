@@ -6,3 +6,4 @@ uvicorn>=0.32
 pywebview>=6.0
 pythonnet>=3.0      # для pywebview на Windows (WinForms + WebView2)
 colorama            # для click/uvicorn на Windows
+websockets>=15     # мини-клиент CDP для пробы отпечатка

@@ -21,7 +21,7 @@ def test_profiles_crud(xl_root):
     assert c.get(f"/api/profiles/{pid}?with_proxy=true").json()["proxy"] == "h:1:u:p"
     assert c.patch(f"/api/profiles/{pid}", json={"id": "x"}).status_code == 400
 
-    clone = c.post(f"/api/profiles/{pid}/clone", json={"name": "B"}).json()
+    clone = c.post(f"/api/profiles/{pid}/clone", json={"name": "B"}).json()["profile"]
     assert clone["id"] != pid and clone["name"] == "B"
 
     assert c.get(f"/api/profiles/{pid}/ip-history").json() == {"history": []}
