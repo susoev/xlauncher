@@ -28,3 +28,17 @@ def test_profiles_crud(xl_root):
     assert c.delete(f"/api/profiles/{pid}").json()["ok"]
     assert c.get(f"/api/profiles/{pid}").status_code == 404
     assert "<title>xlauncher</title>" in c.get("/").text
+
+
+def test_settings_and_logs(xl_root):
+    c = TestClient(create_app(None))
+    assert c.get("/api/settings").json()["engine_version"]
+    assert c.patch("/api/settings", json={"monitor_interval_min": 5}).json()["monitor_interval_min"] == 5
+    assert c.patch("/api/settings", json={"monitor_interval_min": 0}).status_code == 400
+    assert c.patch("/api/settings", json={"engine_version": "1"}).status_code == 400
+    pid = c.post("/api/profiles", json={"name": "L"}).json()["profile"]["id"]
+    from xlauncher.core import profiles
+
+    profiles.append_launch_log(profiles.get(pid), "запуск\t1.2.3.4\tRU")
+    log = c.get(f"/api/profiles/{pid}/launch-log").json()["log"]
+    assert log[0]["event"] == "запуск" and log[0]["details"][0] == "1.2.3.4"

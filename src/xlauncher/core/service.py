@@ -149,3 +149,23 @@ def engine_install() -> dict:
     if not engine.find_exe(version):
         engine.installer.start(version)
     return engine_status()
+
+
+def launch_log(pid: str, limit: int = 60) -> list[dict]:
+    p = profiles.get(pid)
+    try:
+        lines = (p.dir / "launch.log").read_text(encoding="utf-8").splitlines()[-limit:]
+    except OSError:
+        return []
+    out = []
+    for ln in reversed(lines):
+        parts = ln.split("\t")
+        out.append({"time": parts[0], "event": parts[1] if len(parts) > 1 else "", "details": parts[2:]})
+    return out
+
+
+def open_folder(path: Path) -> dict:
+    if sys.platform == "win32":
+        os.startfile(str(path))  # noqa: S606
+        return {"ok": True}
+    return {"ok": False, "error": "открыть папку можно только на Windows", "path": str(path)}

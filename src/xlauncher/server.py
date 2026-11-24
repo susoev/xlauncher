@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 from fastapi import Body, FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 
-from . import __version__, paths
+from . import __version__, paths, settings
 from .core import iphistory, profiles, service
 
 if TYPE_CHECKING:
@@ -46,6 +46,7 @@ def create_app(updater: "Updater | None") -> FastAPI:
             "updater": updater.status() if updater else {"state": "выключено (запуск из исходников)"},
             "engine": service.engine_status(),
             "audit": service.uniqueness.auditor.state,
+            "bootstrap_version": updater.bootstrap_version() if updater else None,
         }
 
     @app.post("/api/ui-ping")
@@ -110,6 +111,36 @@ def create_app(updater: "Updater | None") -> FastAPI:
     @app.get("/api/profiles/{pid}/ip-history")
     def ip_history(pid: str) -> dict:
         return {"history": iphistory.read(profiles.get(pid).dir)}
+
+    @app.get("/api/profiles/{pid}/launch-log")
+    def launch_log(pid: str) -> dict:
+        return {"log": service.launch_log(pid)}
+
+    @app.post("/api/profiles/{pid}/open-folder")
+    def open_profile_folder(pid: str) -> dict:
+        return service.open_folder(profiles.get(pid).dir)
+
+    @app.post("/api/open-root")
+    def open_root() -> dict:
+        return service.open_folder(paths.root())
+
+    @app.get("/api/settings")
+    def get_settings() -> dict:
+        return settings.load()
+
+    @app.patch("/api/settings")
+    def patch_settings(body: dict = Body(...)) -> dict:
+        allowed = {"monitor_interval_min"}
+        bad = set(body) - allowed
+        if bad:
+            raise ValueError(f"нельзя менять: {', '.join(sorted(bad))}")
+        if "monitor_interval_min" in body:
+            v = int(body["monitor_interval_min"])
+            if not 1 <= v <= 120:
+                raise ValueError("интервал проверки IP — от 1 до 120 минут")
+            body["monitor_interval_min"] = v
+        settings.save(body)
+        return settings.load()
 
     @app.post("/api/proxy/check")
     def check_proxy(body: dict = Body(...)) -> dict:
