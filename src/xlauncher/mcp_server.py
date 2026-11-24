@@ -252,9 +252,12 @@ def browser_close_tab(profile: str, tab: str) -> str:
 
 
 @mcp.tool()
-def browser_navigate(profile: str, url: str, tab: str | None = None) -> str:
-    """Открывает адрес во вкладке и ждёт загрузки."""
-    r = _b(profile, "navigate", url=url, tab=tab)
+def browser_navigate(profile: str, url: str, tab: str | None = None, referrer: str | None = None) -> str:
+    """Открывает адрес во вкладке и ждёт загрузки. referrer — откуда «пришёл» переход (например, https://www.google.com/).
+
+    Лучше переходить кликом по ссылке: referrer нужен, только если клик невозможен.
+    """
+    r = _b(profile, "navigate", url=url, tab=tab, referrer=referrer)
     return f"Открыто: {r['title']} — {r['url']}"
 
 
@@ -268,7 +271,8 @@ def browser_snapshot(profile: str, tab: str | None = None, text_limit: int = 300
 def browser_click(profile: str, ref: str, tab: str | None = None) -> str:
     """Клик мышью по элементу (ref из последнего снимка, например e123)."""
     r = _b(profile, "click", ref=ref, tab=tab)
-    return f"Нажато {ref}. Адрес: {r['url']}"
+    scale = f" (масштаб экрана {r['scale']})" if r.get("scale") and r["scale"] != 1 else ""
+    return f"Нажато {ref}. Адрес: {r['url']}{scale}"
 
 
 @mcp.tool()

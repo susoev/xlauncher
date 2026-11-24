@@ -62,9 +62,21 @@ DESCRIBE_FN = r"""function () {
 }"""
 
 CENTER_FN = r"""function () {
+  // Точка, где под курсором действительно этот элемент. У многострочной ссылки центр общего
+  // прямоугольника часто попадает в промежуток между строками — там уже родительский блок.
   this.scrollIntoView({block: 'center', inline: 'center', behavior: 'instant'});
-  const r = this.getBoundingClientRect();
-  return {x: r.left + r.width / 2, y: r.top + r.height / 2, w: r.width, h: r.height};
+  const hits = (x, y) => { const h = document.elementFromPoint(x, y); return h && (h === this || this.contains(h)); };
+  let rects = [...this.getClientRects()].filter(r => r.width > 1 && r.height > 1);
+  if (!rects.length) rects = [this.getBoundingClientRect()];
+  rects.sort((a, b) => b.width * b.height - a.width * a.height);
+  for (const r of rects) {
+    const cx = r.left + r.width / 2, cy = r.top + r.height / 2;
+    for (const [x, y] of [[cx, cy], [r.left + Math.min(12, r.width / 2), cy], [cx, r.top + Math.min(8, r.height / 2)]]) {
+      if (x >= 0 && y >= 0 && x < innerWidth && y < innerHeight && hits(x, y)) return {x, y, w: r.width, h: r.height, hit: true};
+    }
+  }
+  const r = rects[0];
+  return {x: r.left + r.width / 2, y: r.top + r.height / 2, w: r.width, h: r.height, hit: false};
 }"""
 
 KEYS = {
@@ -188,7 +200,31 @@ class Session:
             raise BrowserError(f"элемент {ref} не найден — страница изменилась, сделай снимок заново") from e
         return res["object"]["objectId"]
 
+    async def scale(self) -> float:
+        """Во сколько раз координаты события на странице отличаются от переданных в Input.*.
+
+        На Windows с масштабом экрана 125–150 % они могут не совпадать. Двигаем мышь в известную
+        точку и читаем clientX/Y слушателем в изолированном мире (страница его не видит).
+        """
+        if getattr(self, "_scale", None):
+            return self._scale
+        ctx = await self.world()
+        await self.eval("window.__xlm = null; document.addEventListener('mousemove', "
+                        "e => { window.__xlm = [e.clientX, e.clientY]; }, {capture: true, once: true}); 1", ctx=ctx)
+        await self.send("Input.dispatchMouseEvent", {"type": "mouseMoved", "x": 200, "y": 200})
+        got = None
+        for _ in range(10):
+            await asyncio.sleep(0.03)
+            got = await self.eval("window.__xlm", ctx=ctx)
+            if got:
+                break
+        ratio = (got[0] / 200) if got and got[0] else 1.0
+        self._scale = ratio if 0.3 < ratio < 4 else 1.0
+        return self._scale
+
     async def mouse_click(self, x: float, y: float) -> None:
+        k = await self.scale()
+        x, y = x / k, y / k
         await self.send("Input.dispatchMouseEvent", {"type": "mouseMoved", "x": x, "y": y})
         await self.send("Input.dispatchMouseEvent", {"type": "mousePressed", "x": x, "y": y, "button": "left",
                                                      "clickCount": 1})
@@ -259,11 +295,14 @@ def format_snapshot(snap: dict) -> str:
     return "\n".join(lines)
 
 
-async def navigate(port: int, url: str, tab: str | None = None) -> dict:
+async def navigate(port: int, url: str, tab: str | None = None, referrer: str | None = None) -> dict:
     if "://" not in url and not url.startswith("about:"):
         url = "https://" + url
     async with Session(port, tab) as s:
-        res = await s.send("Page.navigate", {"url": url})
+        params = {"url": url}
+        if referrer:
+            params["referrer"] = referrer
+        res = await s.send("Page.navigate", params)
         if res.get("errorText"):
             raise BrowserError(f"не удалось открыть {url}: {res['errorText']}")
         await asyncio.sleep(0.3)
@@ -280,8 +319,8 @@ async def click(port: int, ref: str, tab: str | None = None) -> dict:
         await asyncio.sleep(0.15)
         c = await s.call_on(oid, CENTER_FN)
         await s.mouse_click(c["x"], c["y"])
-        await asyncio.sleep(0.4)
-        return {"clicked": ref, "url": await s.eval("location.href")}
+        await asyncio.sleep(0.8)
+        return {"clicked": ref, "url": await s.eval("location.href"), "scale": round(await s.scale(), 3)}
 
 
 async def type_text(port: int, ref: str, text: str, submit: bool = False, clear: bool = True,

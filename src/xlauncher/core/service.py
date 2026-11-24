@@ -207,7 +207,7 @@ def browser_action(pid: str, action: str, args: dict) -> dict:
             browser.close_tab(port, args["tab"])
             res = {"ok": True}
         elif action == "navigate":
-            res = _run_async(browser.navigate(port, args["url"], tab))
+            res = _run_async(browser.navigate(port, args["url"], tab, args.get("referrer")))
         elif action == "snapshot":
             snap = _run_async(browser.snapshot(port, tab, int(args.get("text_limit") or 3000)))
             res = {"text": browser.format_snapshot(snap), "url": snap["url"], "title": snap["title"]}

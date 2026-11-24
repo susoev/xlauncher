@@ -35,6 +35,8 @@ def _port():
 def chrome(tmp_path_factory):
     site = tmp_path_factory.mktemp("site")
     (site / "index.html").write_text(PAGE, encoding="utf-8")
+    (site / "gap.html").write_text('<meta charset="utf-8"><div style="width:600px"><a href="two.html"><span>https://site</span>'
+                                   '<br><br><br><br><h3 style="display:inline">Заголовок</h3></a></div>', encoding="utf-8")
     (site / "two.html").write_text('<meta charset="utf-8"><title>Два</title><p>Вторая страница', encoding="utf-8")
     handler = functools.partial(SimpleHTTPRequestHandler, directory=str(site))
     handler.log_message = lambda *a: None
@@ -78,5 +80,17 @@ def test_snapshot_type_click_without_dom_traces(chrome):
         assert (await b.wait_for(chrome, "Вторая страница", 5))["found"]
         with pytest.raises(b.BrowserError, match="снимок заново"):
             await b.click(chrome, "e99999999")
+
+    asyncio.run(go())
+
+
+def test_click_multiline_link_hits_text_not_gap(chrome):
+    """Ссылка из выдачи Google: адрес и заголовок на разных строках, между ними пусто."""
+
+    async def go():
+        await b.navigate(chrome, b.tabs(chrome)[0]["url"].rsplit("/", 1)[0] + "/gap.html")
+        snap = await b.snapshot(chrome)
+        r = await b.click(chrome, snap["elements"][0]["ref"])
+        assert r["url"].endswith("/two.html"), r
 
     asyncio.run(go())
