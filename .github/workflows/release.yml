@@ -1,0 +1,109 @@
+# Каждый push в main: тесты → сборка → проверка на Windows → релиз.
+# Лаунчеры на компьютерах пользователя подхватывают релиз сами (ARCHITECTURE.md §9).
+name: release
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - "**.md"
+      - "spike/**"
+      - ".gitignore"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.ver.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: bootstrap/go.mod
+          cache: false
+
+      - name: Тесты Python
+        run: |
+          pip install -r requirements-dev.txt
+          python -m pytest -q
+
+      - name: Тесты загрузчика
+        working-directory: bootstrap
+        run: go test ./...
+
+      - name: Версия
+        id: ver
+        run: echo "version=$(date -u +%Y.%-m.%-d).${{ github.run_number }}" >> "$GITHUB_OUTPUT"
+
+      - name: Сборка загрузчика
+        working-directory: bootstrap
+        env:
+          GOOS: windows
+          GOARCH: amd64
+          CGO_ENABLED: "0"
+        run: go build -trimpath -ldflags "-H windowsgui -s -w" -o ../dist/xlauncher.exe .
+
+      - name: Сборка приложения
+        run: python build/build_app.py --version "${{ steps.ver.outputs.version }}" --out dist
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: |
+            dist/xlauncher.exe
+            dist/xlauncher-app-*.zip
+            dist/manifest.json
+
+  smoke:
+    needs: build
+    runs-on: windows-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist
+
+      - name: Self-test пакета на Windows
+        shell: pwsh
+        run: |
+          $zip = Get-ChildItem dist\xlauncher-app-*.zip | Select-Object -First 1
+          Expand-Archive $zip.FullName -DestinationPath app
+          $env:XL_ROOT = "$PWD\xlroot"
+          Push-Location app
+          .\python\python.exe -m xlauncher --selftest
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Pop-Location
+
+  release:
+    needs: [build, smoke]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist
+
+      - name: Публикация релиза
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.build.outputs.version }}
+          COMMIT_MSG: ${{ github.event.head_commit.message }}
+        run: |
+          gh release create "v$VERSION" dist/* \
+            --repo "${{ github.repository }}" \
+            --title "$VERSION" \
+            --notes "Сборка из ${GITHUB_SHA::7}: ${COMMIT_MSG:-ручной запуск}" \
+            --latest

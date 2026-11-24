@@ -1,0 +1,8 @@
+# Зависимости приложения. Пакет собирается под Windows x64 на Linux
+# (pip --platform win_amd64), поэтому Windows-only зависимости, которые
+# подтягиваются маркерами sys_platform, перечислены здесь явно.
+fastapi>=0.115
+uvicorn>=0.32
+pywebview>=6.0
+pythonnet>=3.0      # для pywebview на Windows (WinForms + WebView2)
+colorama            # для click/uvicorn на Windows

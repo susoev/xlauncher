@@ -520,7 +520,7 @@ HTML/JS-страница, отображаемая в собственном о�
 
 ## 11. Технологии
 
-- Python 3.12 (embeddable на Windows), асинхронное ядро (asyncio).
+- Python 3.13 (embeddable на Windows), асинхронное ядро (asyncio).
 - Сервер: FastAPI + uvicorn.
 - MCP: официальный Python SDK (stdio + Streamable HTTP).
 - Браузерные инструменты: Playwright (`connect_over_cdp`), без установки браузеров Playwright.
@@ -528,8 +528,8 @@ HTML/JS-страница, отображаемая в собственном о�
 - DPAPI: `ctypes` (CryptProtectData/CryptUnprotectData).
 - Геолокация: `maxminddb`.
 - Окно: pywebview (WebView2 на Windows).
-- Загрузчик: небольшой `.exe` (PyInstaller или аналог). Неподписанный `.exe` может вызывать предупреждения SmartScreen/Defender — достаточно разрешить один раз, загрузчик меняется редко.
-- CI: GitHub Actions (`windows-latest`).
+- Загрузчик: Go, один `.exe` без зависимостей (~6 МБ), собирается в CI кросс-компиляцией. Неподписанный `.exe` может вызывать предупреждение SmartScreen — достаточно разрешить один раз.
+- CI: GitHub Actions — сборка на `ubuntu-latest` (пакет под Windows собирается `pip --platform win_amd64`), self-test пакета на `windows-latest`.
 
 ## 12. Этапы
 
