@@ -4,7 +4,7 @@
 # ///
 """xlauncher — этап 1: проверка рисков на Windows.
 
-Запуск из корня репозитория:  uv run spike\\stage1.py
+Запуск из корня репозитория:  uv run spike\\stage1.py [мажорная версия движка, например 148]
 
 Что делает:
   1. скачивает fingerprint-chromium (последний релиз для Windows x64);
@@ -467,7 +467,8 @@ async def main() -> None:
                     "os": platform.platform()}
     print("\n=== xlauncher — этап 1: проверка рисков ===\n")
 
-    exe, ver = ensure_engine()
+    major = int(sys.argv[1]) if len(sys.argv) > 1 else None
+    exe, ver = ensure_engine(major)
     report["engine"] = {"version": ver, "exe": str(exe.relative_to(OUT))}
 
     saved = OUT / "proxies.txt"  # spike/out/ не попадает в git

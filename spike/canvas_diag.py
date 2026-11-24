@@ -40,6 +40,7 @@ FULL_CONFIGS: dict[str, list[str]] = {
     "seed1 без canvas+font": [f"--fingerprint={SEED1}", "--disable-spoofing=canvas,font"],
     "seed1 без всех подмен": [f"--fingerprint={SEED1}", "--disable-spoofing=font,audio,canvas,clientrects,gpu"],
     "seed1 без GPU-ускорения": [f"--fingerprint={SEED1}", "--disable-gpu"],
+    "seed1 без canvas-подмены": [f"--fingerprint={SEED1}", "--disable-spoofing=canvas"],
     "без --fingerprint": [],
 }
 
@@ -49,6 +50,7 @@ COMPARE_CONFIGS: dict[str, list[str]] = {
     "seed2": [f"--fingerprint={SEED2}"],
     "seed3": [f"--fingerprint={SEED3}"],
     "seed1 без GPU-ускорения": [f"--fingerprint={SEED1}", "--disable-gpu"],
+    "seed1 без canvas-подмены": [f"--fingerprint={SEED1}", "--disable-spoofing=canvas"],
     "без --fingerprint": [],
 }
 
@@ -63,6 +65,14 @@ TESTS: dict[str, str] = {
     "measureText": """async () => {
         const x = document.createElement('canvas').getContext('2d'); x.font = '16px Arial';
         return x.measureText('Hello, world').width; }""",
+    "measureText: a / Hello, world / W×10 / пусто": """async () => {
+        const x = document.createElement('canvas').getContext('2d'); x.font = '16px Arial';
+        return ['a', 'Hello, world', 'WWWWWWWWWW', ''].map(t => x.measureText(t).width.toFixed(3)).join(' / '); }""",
+    "measureText в DOM-canvas": """async () => {
+        const c = document.createElement('canvas'); document.body.appendChild(c);
+        const x = c.getContext('2d'); x.font = '16px Arial';
+        const m = x.measureText('Hello, world');
+        return [m.width, m.actualBoundingBoxLeft, m.actualBoundingBoxRight].map(v => v.toFixed(3)).join(' / '); }""",
     "fillText ascii (без выгрузки)": """async () => {
         const c = document.createElement('canvas'); c.width = 200; c.height = 50;
         const x = c.getContext('2d'); x.font = '16px Arial'; x.fillText('Hello, world', 5, 30);
@@ -170,7 +180,7 @@ def table(results: dict[str, dict]) -> list[str]:
         row = []
         for c in cfgs:
             r = results[c].get(t)
-            row.append("—" if r is None else str(r["value"])[:24].replace("|", "\\|"))
+            row.append("—" if r is None else str(r["value"])[:40].replace("|", "\\|"))
         lines.append(f"| {t} | " + " | ".join(row) + " |")
     errs = {c: r["_error"] for c, r in results.items() if "_error" in r}
     if errs:
