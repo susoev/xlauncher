@@ -48,6 +48,14 @@ TIMING = {
     "reading_pause_sec": [8, 15],
     "internal_pages": [1, 2],            # сколько внутренних страниц открыть на сайте
     "typing_delay_sec": [0.05, 0.22],    # задержка между символами в поиске
+    # «возврат посетителя»: часть сайтов остаётся во вкладках, к ним периодически возвращаемся
+    "keep_tabs_max": 3,                  # сколько вкладок с сайтами держать открытыми
+    "keep_tab_chance": 0.5,              # вероятность оставить сайт во вкладке
+    "revisit_chance": 0.4,               # вероятность вернуться к открытой вкладке между сайтами
+    "revisit_in_browse_chance": 0.08,    # то же — во время чтения другого сайта (за серию прокрутки)
+    "revisit_sec": [8, 25],              # сколько пробыть на вкладке при возврате
+    "revisit_click_chance": 0.4,         # вероятность перейти там по внутренней ссылке
+    "final_round": True,                 # в конце вернуться ко всем открытым вкладкам
 }
 
 # Органические ссылки на домен в выдаче (без рекламы).
@@ -126,6 +134,9 @@ class Runner:
         self.state: dict = {"status": "running", "done": 0, "total": 0, "current": None, "results": [],
                             "started": time.time()}
         self.t = load_timing()
+        self.work_tab: str | None = None   # вкладка для поиска
+        self.kept: list[dict] = []          # открытые сайты: {"tab", "domain"}
+        self.in_revisit = False
 
     def rng(self, key: str) -> tuple[float, float]:
         a, b = self.t[key]
@@ -195,13 +206,77 @@ class Runner:
                 await s.send("Input.dispatchMouseEvent", {"type": "mouseWheel", "x": x, "y": y, "deltaX": 0, "deltaY": px})
                 await asyncio.sleep(random.uniform(0.04, 0.12))
 
+    async def revisit(self) -> None:
+        """Возвращается к одной из открытых вкладок: листает, иногда переходит по ссылке, возвращается назад."""
+        if not self.kept or self.in_revisit:
+            return
+        self.in_revisit = True
+        back = self.tab_ids()[0] if self.tab_ids() else None
+        k = random.choice(self.kept)
+        try:
+            if k["tab"] not in self.tab_ids():
+                self.kept.remove(k)
+                return
+            browser.activate_tab(self.port, k["tab"])
+            self.state["revisits"] = self.state.get("revisits", 0) + 1
+            self._emit()
+            await self.pause(1, 3)
+            end = time.monotonic() + random.uniform(*self.rng("revisit_sec"))
+            clicked = random.random() >= float(self.t["revisit_click_chance"])  # True = клик уже «не нужен»
+            while time.monotonic() < end:
+                await self.wheel(k["tab"])
+                await self.pause(*self.rng("scroll_pause_sec"))
+                if not clicked and time.monotonic() < end - 5:
+                    clicked = True
+                    async with Session(self.port, k["tab"]) as s:
+                        links = await s.find(INTERNAL_JS.replace("%DOMAIN%", json.dumps(k["domain"])))
+                        ok = bool(links) and await s.click_object(random.choice(links[:12]))
+                    if ok:
+                        await asyncio.sleep(1)
+                        await self.wait_loaded(k["tab"])
+        except Stopped:
+            raise
+        except Exception as e:  # noqa: BLE001
+            log.info("возврат к вкладке: %s", e)
+        finally:
+            self.in_revisit = False
+            if back and back in self.tab_ids():
+                try:
+                    browser.activate_tab(self.port, back)
+                except Exception:  # noqa: BLE001
+                    pass
+
+    def keep_or_close(self, tab: str | None, domain: str) -> None:
+        """После сайта: оставить его во вкладке (для возвратов) или закрыть/освободить."""
+        if not tab:
+            return
+        keep = len(self.kept) < int(self.t["keep_tabs_max"]) and random.random() < float(self.t["keep_tab_chance"])
+        if keep:
+            self.kept.append({"tab": tab, "domain": domain})
+            if tab == self.work_tab:
+                self.work_tab = None  # следующий поиск — в новой вкладке
+        elif tab != self.work_tab and len(self.tab_ids()) > 1:
+            try:
+                browser.close_tab(self.port, tab)
+            except Exception:  # noqa: BLE001
+                pass
+
     # ---------------------------------------------------------- шаги
+
+    def ensure_work_tab(self) -> str:
+        ids = self.tab_ids()
+        if not self.work_tab or self.work_tab not in ids or any(k["tab"] == self.work_tab for k in self.kept):
+            free = [t for t in ids if not any(k["tab"] == t for k in self.kept)]
+            self.work_tab = free[0] if free else browser.new_tab(self.port)["id"]
+        browser.activate_tab(self.port, self.work_tab)
+        return self.work_tab
 
     async def search(self, engine: str, query: str) -> str:
         e = SEARCH[engine]
-        await browser.navigate(self.port, e["home"])
-        await self.wait_loaded()
-        async with Session(self.port) as s:
+        tab = self.ensure_work_tab()
+        await browser.navigate(self.port, e["home"], tab)
+        await self.wait_loaded(tab)
+        async with Session(self.port, tab) as s:
             fields = await s.find(f"[...document.querySelectorAll({json.dumps(e['input'])})].filter(x => x.offsetParent)")
             if not fields:
                 return await s.eval("location.href")
@@ -211,17 +286,18 @@ class Runner:
                 await asyncio.sleep(random.uniform(*self.rng("typing_delay_sec")))
             await asyncio.sleep(random.uniform(0.3, 0.9))
             await s.key("enter")
-        url = await self.wait_url(lambda u: "search" in u or "text=" in u or self.is_captcha(u), 15)
-        await self.wait_loaded()
+        url = await self.wait_url(lambda u: "search" in u or "text=" in u or self.is_captcha(u), 15, tab)
+        await self.wait_loaded(tab)
         return url
 
     async def open_result(self, domain: str) -> str | None:
         """Кликает по органической ссылке на домен. Возвращает id вкладки, где открылся сайт."""
         before = set(self.tab_ids())
+        work = self.work_tab
         if random.random() < 0.5:
-            await self.wheel(None)  # пробежать выдачу глазами
+            await self.wheel(work)  # пробежать выдачу глазами
         await self.pause(0.8, 2.5)
-        async with Session(self.port) as s:
+        async with Session(self.port, work) as s:
             links = await s.find(RESULT_JS.replace("%DOMAIN%", json.dumps(domain)))
             if not links:
                 return None
@@ -234,8 +310,8 @@ class Runner:
             browser.activate_tab(self.port, new[0])
             await self.wait_url(lambda u: domain in u or self.is_captcha(u), 20, new[0])
             return new[0]
-        url = await self.wait_url(lambda u: domain in u or self.is_captcha(u), 20)
-        return None if domain not in url and not self.is_captcha(url) else self.tab_ids()[0]
+        url = await self.wait_url(lambda u: domain in u or self.is_captcha(u), 20, work)
+        return None if domain not in url and not self.is_captcha(url) else work
 
     async def browse(self, site: dict, tab: str | None) -> dict:
         lo, hi = site.get("dwell_sec") or [40, 60]
@@ -247,6 +323,11 @@ class Runner:
         jumps = sorted(budget * random.uniform(0.25, 0.65) for _ in range(n_jumps))
         while time.monotonic() < end:
             await self.wheel(tab)
+            if self.kept and random.random() < float(self.t["revisit_in_browse_chance"]):
+                await self.revisit()
+                if tab:
+                    browser.activate_tab(self.port, tab)
+                end += 5  # время на другой вкладке не съедает время этого сайта
             if random.random() < float(self.t["reading_pause_chance"]):
                 await self.pause(*self.rng("reading_pause_sec"))
             else:
@@ -276,8 +357,8 @@ class Runner:
         if tab is None:
             # в выдаче не нашли — заходим напрямую
             res["via"] = "прямой заход"
-            await browser.navigate(self.port, site["url"])
-            tab = self.tab_ids()[0]
+            tab = self.ensure_work_tab()
+            await browser.navigate(self.port, site["url"], tab)
         await self.wait_loaded(tab)
         u = await self.url(tab)
         if self.is_captcha(u):
@@ -285,9 +366,9 @@ class Runner:
         else:
             b = await self.browse(site, tab)
             res.update(result="captcha" if b["captcha"] else "ok", pages=b["pages"])
-        # закрываем вкладку, открытую выдачей, если она лишняя
-        tabs = self.tab_ids()
-        if tab and len(tabs) > 1:
+        if res.get("result") == "ok":
+            self.keep_or_close(tab, site["domain"])
+        elif tab and tab != self.work_tab:
             try:
                 browser.close_tab(self.port, tab)
             except Exception:  # noqa: BLE001
@@ -317,11 +398,20 @@ class Runner:
                              f"{r.get('pages', 0)} стр.\t{r.get('sec', 0)} с")
                 self._emit()
                 if self.state["done"] < self.state["total"]:
+                    if self.kept and random.random() < float(self.t["revisit_chance"]):
+                        await self.revisit()
+                    await self.pause(*self.rng("between_sites_sec"))
+            if self.t.get("final_round") and self.kept:
+                self.state["current"] = "возврат к открытым вкладкам"
+                self._emit()
+                for _ in list(self.kept):
+                    await self.revisit()
                     await self.pause(*self.rng("between_sites_sec"))
             self.state["status"] = "done"
         except Stopped:
             self.state["status"] = "stopped"
         self.state["current"] = None
+        self.state["kept_tabs"] = [k["domain"] for k in self.kept]
         self.state["finished"] = time.time()
         self._emit()
         return self.state

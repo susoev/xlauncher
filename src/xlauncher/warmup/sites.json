@@ -36,7 +36,17 @@
     "typing_delay_sec": [
       0.05,
       0.22
-    ]
+    ],
+    "keep_tabs_max": 3,
+    "keep_tab_chance": 0.5,
+    "revisit_chance": 0.4,
+    "revisit_in_browse_chance": 0.08,
+    "revisit_sec": [
+      8,
+      25
+    ],
+    "revisit_click_chance": 0.4,
+    "final_round": true
   },
   "sites": [
     {

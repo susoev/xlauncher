@@ -65,10 +65,12 @@ def test_warmup_via_search_skips_ads(tmp_path, monkeypatch, xl_root):
     search_srv = _serve(search, search_hits)
     monkeypatch.setitem(warmup.SEARCH, "google", {"home": f"http://127.0.0.1:{search_srv.server_address[1]}/home.html",
                                                   "input": "input[name=q]"})
-    sites = [{"name": "Тест", "domain": "localhost", "url": f"http://localhost:{sport}/index.html", "query": "тест сайт",
-              "dwell_sec": [14, 16], "enabled": True}]
+    sites = [{"name": f"Тест {i}", "domain": "localhost", "url": f"http://localhost:{sport}/index.html",
+              "query": f"тест сайт {i}", "dwell_sec": [14, 16], "enabled": True} for i in (1, 2)]
+    timing = {"keep_tabs_max": 2, "keep_tab_chance": 1, "revisit_chance": 1, "revisit_in_browse_chance": 0,
+              "revisit_sec": [6, 8], "revisit_click_chance": 0, "internal_pages": [1, 1], "between_sites_sec": [1, 2]}
     (xl_root / "warmup").mkdir()
-    (xl_root / "warmup" / "sites.json").write_text(json.dumps({"sites": sites}), encoding="utf-8")
+    (xl_root / "warmup" / "sites.json").write_text(json.dumps({"sites": sites, "timing": timing}), encoding="utf-8")
 
     async def fast_pause(self, a, c):
         if self.stop.is_set():
@@ -98,9 +100,12 @@ def test_warmup_via_search_skips_ads(tmp_path, monkeypatch, xl_root):
         search_srv.shutdown()
 
     assert res["status"] == "done", res
-    one = res["results"][0]
-    assert one["result"] == "ok" and one["via"] == "google", one
-    assert one["pages"] >= 2, one  # главная + хотя бы одна внутренняя
+    for one in res["results"]:
+        assert one["result"] == "ok" and one["via"] == "google", one
+        assert one["pages"] >= 2, one  # главная + хотя бы одна внутренняя
     assert "/ad.html" not in site_hits  # рекламу не трогали
-    assert any(h.startswith("/search-results.html?q=") for h in search_hits)
-    assert progress[-1]["done"] == 1
+    assert sum(h.startswith("/search-results.html?q=") for h in search_hits) == 2
+    assert progress[-1]["done"] == 2
+    # «возврат посетителя»: оба сайта остались во вкладках, к ним возвращались (между сайтами и в финальном круге)
+    assert res["kept_tabs"] == ["localhost", "localhost"]
+    assert res.get("revisits", 0) >= 3
