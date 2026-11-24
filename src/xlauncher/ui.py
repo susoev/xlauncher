@@ -45,6 +45,7 @@ INDEX_HTML = r"""<!doctype html>
 <header>
   <h1>xlauncher</h1><span id="ver" class="mut small"></span><span class="sp"></span>
   <span id="upd" class="mut small"></span>
+  <button onclick="checkUpdates()" title="Проверить обновления сейчас">⟳</button>
   <button class="pri" onclick="openForm()">+ Новый профиль</button>
 </header>
 <main>
@@ -149,6 +150,7 @@ async function load() {
     $('ver').textContent = s.version;
     const u = s.updater || {};
     $('upd').textContent = u.last_error ? 'обновления: ошибка' : (u.state === 'up-to-date' ? 'актуальная версия' : (u.state || ''));
+    $('upd').title = u.last_error || (u.last_check ? 'последняя проверка: ' + u.last_check : '');
     let b = '';
     const e = s.engine;
     if (!e.installed) {
@@ -180,6 +182,10 @@ async function load() {
 }
 let lastOk = 0;
 
+async function checkUpdates() {
+  try { await api('POST', '/api/update/check'); toast('Проверяю обновления… Если найдётся новая версия, окно перезапустится само.', 'ok', 5000); }
+  catch (e) { toast(e.message); }
+}
 async function act(id, what, body) {
   try { const r = await api('POST', `/api/profiles/${id}/${what}`, body || {}); if (r.ok === false && r.error) toast(r.error); }
   catch (e) { toast(e.message); }
