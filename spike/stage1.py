@@ -460,10 +460,19 @@ async def main() -> None:
     exe, ver = ensure_engine()
     report["engine"] = {"version": ver, "exe": str(exe.relative_to(OUT))}
 
-    print("\nВставь строку прокси (ввод скрыт). Форматы: socks5://user:pass@host:port, "
-          "http://user:pass@host:port, host:port:user:pass.")
-    p1 = getpass.getpass("Прокси для профиля A (Enter — без прокси): ")
-    p2 = getpass.getpass("Прокси для профиля B (Enter — тот же): ") or p1
+    saved = OUT / "proxies.txt"  # spike/out/ не попадает в git
+    p1 = p2 = None
+    if saved.exists():
+        lines = saved.read_text(encoding="utf-8").splitlines() + ["", ""]
+        shown = [str(parse_proxy(x).masked()) if x.strip() else "(без прокси)" for x in lines[:2]]
+        if input(f"\nСохранённые прокси: A={shown[0]}, B={shown[1]}. Использовать? [Y/n]: ").strip().lower() not in ("n", "н", "no", "нет"):
+            p1, p2 = lines[0], lines[1]
+    if p1 is None:
+        print("\nВставь строку прокси (ввод скрыт). Форматы: socks5://user:pass@host:port, "
+              "http://user:pass@host:port, host:port:user:pass.")
+        p1 = getpass.getpass("Прокси для профиля A (Enter — без прокси): ")
+        p2 = getpass.getpass("Прокси для профиля B (Enter — тот же): ") or p1
+        saved.write_text(f"{p1}\n{p2}\n", encoding="utf-8")
     up1, up2 = parse_proxy(p1), parse_proxy(p2)
 
     log("Определяю реальный IP (без прокси) для проверки утечек…")
