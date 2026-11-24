@@ -27,7 +27,7 @@ def test_profiles_crud(xl_root):
     assert c.get(f"/api/profiles/{pid}/ip-history").json() == {"history": []}
     assert c.delete(f"/api/profiles/{pid}").json()["ok"]
     assert c.get(f"/api/profiles/{pid}").status_code == 404
-    assert "<title>xlauncher</title>" in c.get("/").text
+    assert "<title>XLauncher</title>" in c.get("/").text
 
 
 def test_settings_and_logs(xl_root):
