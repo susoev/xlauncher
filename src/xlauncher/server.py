@@ -9,7 +9,7 @@ from fastapi import Body, FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 
 from . import __version__, paths, settings
-from .core import iphistory, profiles, service
+from .core import iphistory, profiles, service, tailscale
 
 if TYPE_CHECKING:
     from .updater import Updater
@@ -48,7 +48,16 @@ def create_app(updater: "Updater | None") -> FastAPI:
             "audit": service.uniqueness.auditor.state,
             "bootstrap_version": updater.bootstrap_version() if updater else None,
             "host": __import__("platform").node(),
+            "tailscale": tailscale.current(),
         }
+
+    @app.get("/api/tailscale")
+    def tailscale_status() -> dict:
+        return tailscale.refresh()
+
+    @app.post("/api/tailscale/{what}")
+    def tailscale_action(what: str) -> dict:
+        return tailscale.action(what)
 
     @app.post("/api/ui-ping")
     def ui_ping() -> dict:

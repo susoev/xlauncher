@@ -92,6 +92,10 @@ def selftest() -> int:
 
     assert len(warmup.load_sites()) > 10 and warmup.load_timing()["between_sites_sec"]
 
+    from .core import tailscale
+
+    print(f"selftest tailscale: {tailscale.status()['state']}")  # только сообщаем: на CI его нет — это нормально
+
     fp = fingerprint.generate("RU")
     args = engine.build_args(data_dir=paths.root(), cache_dir=paths.root(), fingerprint=fp, proxy_port=1,
                              timezone="Europe/Moscow")

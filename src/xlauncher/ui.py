@@ -404,10 +404,31 @@ function select(id) {
 }
 
 // ---------- баннеры
+let tsDismissed = false;
+const TS = {
+  missing: ['alarm', 'Tailscale не установлен. Он нужен для переезда, удалённого управления и прокси внутри сети Tailscale.', [['download', 'Скачать Tailscale', true]]],
+  stopped: ['caution', 'Tailscale установлен, но не запущен.', [['start', 'Запустить', true], ['recheck', 'Проверить снова']]],
+  needs_login: ['caution', 'Tailscale не авторизован — войдите в свой аккаунт.', [['open', 'Открыть Tailscale', true], ['recheck', 'Проверить снова']]],
+  offline: ['caution', 'Tailscale запущен, но нет связи с сетью.', [['recheck', 'Проверить снова', true]]],
+};
+function tailscaleBanner(t) {
+  const v = TS[t.state];
+  if (!v || tsDismissed) return '';
+  const btns = v[2].map(([a, label, primary]) => `<button ${primary ? 'class="primary"' : ''} onclick="tsAction('${a}')">${label}</button>`).join('');
+  return `<div class="banner ${v[0]}"><div class="text">${v[1]}</div><div class="actions">${btns}<button onclick="tsDismissed=true;renderBanners()" title="Скрыть до перезапуска лаунчера">✕</button></div></div>`;
+}
+async function tsAction(what) {
+  try {
+    const r = await api('POST', `/api/tailscale/${what}`);
+    if (r.ok === false) toast(r.error);
+    if (r.tailscale) { status.tailscale = r.tailscale; renderBanners(); if (r.tailscale.state === 'running') toast('Tailscale в сети', 'ok', 3000); }
+  } catch (e) { toast(e.message); }
+}
 function renderBanners() {
   const s = status, e = s.engine || {}, au = s.audit || {};
   let b = '';
   if (s._connError) b += `<div class="banner alarm"><div class="text">Нет связи с лаунчером: ${esc(s._connError)}. Данные на экране могут быть устаревшими.</div></div>`;
+  b += tailscaleBanner(s.tailscale || {});
   if (e.version && !e.installed) {
     const ins = e.installer || {};
     if (ins.status === 'downloading') {
