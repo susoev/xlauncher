@@ -364,6 +364,7 @@ function renderDetail() {
       <button onclick="openForm('${p.id}')" ${v.active ? 'disabled title="Сначала останови профиль"' : ''}>Изменить</button>
       <button onclick="cloneP('${p.id}')" ${p.duplicate ? 'disabled' : ''}>Клонировать</button>
       <button onclick="startWarmup('${p.id}')" ${p.duplicate || !p.proxy_masked || ((st.warmup || {}).status === 'running' && st.status === 'running') ? 'disabled' : ''}>Прогреть</button>
+      <button onclick="startDayRoutine('${p.id}')" title="3–4 сайта через поиск Яндекса, листание, профиль закроется сам" ${p.duplicate || !p.proxy_masked || ((st.warmup || {}).status === 'running' && st.status === 'running') ? 'disabled' : ''}>Дневной обход</button>
       <button onclick="api('POST','/api/profiles/${p.id}/open-folder').catch(e => toast(e.message))">Открыть папку</button>
       <span class="spacer"></span>
       <button class="danger" onclick="delP('${p.id}')" ${v.active ? 'disabled title="Сначала останови профиль"' : ''}>Удалить</button>
@@ -375,7 +376,8 @@ function warmupSection(p) {
   const R = {ok: 'пройден', captcha: 'капча', error: 'ошибка'};
   const head = w.status === 'running' ? `идёт: ${w.done} из ${w.total}${w.current ? ', сейчас ' + esc(w.current) : ''}`
     : w.status === 'done' ? `завершён: ${w.done} из ${w.total}` : w.status === 'stopped' ? 'остановлен' : esc(w.error || w.status);
-  return `<section><h2>Прогрев<span class="aside">${head}</span>${w.status === 'running' ? `<button onclick="api('POST','/api/profiles/${p.id}/warmup/stop').then(load)">Остановить прогрев</button>` : ''}</h2>
+  const title = w.kind === 'day_routine' ? 'Дневной обход' : 'Прогрев';
+  return `<section><h2>${title}<span class="aside">${head}</span>${w.status === 'running' ? `<button onclick="api('POST','/api/profiles/${p.id}/warmup/stop').then(load)">Остановить</button>` : ''}</h2>
     ${w.total ? `<div class="progress"><i style="width:${Math.round(100 * w.done / w.total)}%"></i></div>` : ''}
     ${(w.results || []).length ? `<ul class="timeline">${w.results.slice().reverse().map(r => `<li><span>${esc(r.name || r.domain)}</span>
       <span class="${r.result === 'ok' ? 'ok' : 'bad'}">${esc(R[r.result] || r.result)}</span>
@@ -386,6 +388,13 @@ async function startWarmup(id) {
   const n = await ask('Прогреть профиль', 'Лаунчер сам обойдёт сайты из списка через поиск Google, как обычный человек: откроет выдачу, перейдёт на сайт, почитает и полистает. Сайты Яндекса пропускаются (на IP из дата-центра они дают капчу). Сколько сайтов пройти? Каждый — около минуты.', {input: '10', ok: 'Начать прогрев'});
   if (n === null) return;
   try { const r = await api('POST', `/api/profiles/${id}/warmup`, {count: Number(n) || 10}); if (r.ok === false) toast(r.error); else toast('Прогрев начнётся, как только откроется браузер', 'ok', 5000); }
+  catch (e) { toast(e.message); }
+  load();
+}
+async function startDayRoutine(id) {
+  const go = await ask('Дневной обход', 'Лаунчер запустит профиль, найдёт в Яндексе 3–4 случайных сайта из списка прогрева, полистает их и закроет профиль. Займёт 3–5 минут. Если профиль уже открыт, он останется открытым. Итог — в журнале запусков.', {ok: 'Начать'});
+  if (!go) return;
+  try { const r = await api('POST', `/api/profiles/${id}/day-routine`, {}); if (r.ok === false) toast(r.error); else toast('Дневной обход начнётся, как только откроется браузер', 'ok', 5000); }
   catch (e) { toast(e.message); }
   load();
 }

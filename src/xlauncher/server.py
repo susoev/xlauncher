@@ -110,6 +110,11 @@ def create_app(updater: "Updater | None") -> FastAPI:
         profiles.get(pid)
         return service.warmup_start(pid, body)
 
+    @app.post("/api/profiles/{pid}/day-routine")
+    def day_routine(pid: str, body: dict = Body(default={})) -> dict:
+        profiles.get(pid)
+        return service.day_routine_start(pid, body)
+
     @app.post("/api/profiles/{pid}/warmup/stop")
     def warmup_stop(pid: str) -> dict:
         return service.warmup_stop(pid)

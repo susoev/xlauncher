@@ -70,7 +70,7 @@ def test_remote_mcp_requires_token(app_api):
     assert _get(url) == 401
     assert _get(url, "wrong") == 401
     names, info = asyncio.run(_tools(url, "secret-token"))
-    assert {"list_profiles", "start_profile", "browser_snapshot", "warmup_profile", "machine_info"} <= names
+    assert {"list_profiles", "start_profile", "browser_snapshot", "warmup_profile", "day_routine", "launch_log", "machine_info"} <= names
     assert "компьютер:" in info and "профилей: 0" in info
 
     # выключить и включить заново — сервер пересоздаётся

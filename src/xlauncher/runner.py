@@ -244,26 +244,36 @@ async def run(pid: str, confirm_country: bool, agent: bool = False) -> int:
 
 
 async def _warmup(p, pid: str, port: int, req: dict, stop: asyncio.Event, state) -> None:
+    """Прогрев или дневной обход (req["mode"] == "day_routine"); итог — в журнал запусков профиля."""
     from .core import warmup
 
-    sites = warmup.pick_sites(int(req.get("count") or 10), bool(req.get("include_yandex")), req.get("only"))
-    engine = req.get("engine") if req.get("engine") in warmup.SEARCH else "google"
+    day = req.get("mode") == "day_routine"
+    label = "day_routine" if day else "прогрев"
+    timing = None
+    if day:
+        sites, engine, timing = warmup.day_routine_plan()
+    else:
+        sites = warmup.pick_sites(int(req.get("count") or 10), bool(req.get("include_yandex")), req.get("only"))
+        engine = req.get("engine") if req.get("engine") in warmup.SEARCH else "google"
     if not sites:
-        state(warmup={"status": "error", "error": "в списке нет подходящих сайтов"})
+        state(warmup={"status": "error", "kind": label, "error": "в списке нет подходящих сайтов"})
         return
-    profiles.append_launch_log(p, f"прогрев: старт\t{len(sites)} сайтов через {engine}")
-    runner = warmup.Runner(port, lambda st: state(warmup=st), stop,
-                           lambda line: profiles.append_launch_log(p, line))
+    profiles.append_launch_log(p, f"{label}: старт\t{len(sites)} сайтов через {engine}")
+    runner = warmup.Runner(port, lambda st: state(warmup={**st, "kind": label}), stop,
+                           lambda line: profiles.append_launch_log(p, line), label=label, timing=timing)
     try:
         res = await runner.run(sites, engine)
         ok = sum(r.get("result") == "ok" for r in res["results"])
         cap = sum(r.get("result") == "captcha" for r in res["results"])
-        profiles.append_launch_log(p, f"прогрев: {res['status']}\t{ok} ок, {cap} капч из {len(res['results'])}")
+        profiles.append_launch_log(p, f"{label}: {res['status']}\t{ok} ок, {cap} капч из {len(res['results'])}")
+        if day and req.get("close") and res["status"] == "done":
+            profiles.append_launch_log(p, f"{label}: закрываю профиль")
+            runstate.request_stop(pid)
     except asyncio.CancelledError:
         pass
     except Exception as e:  # noqa: BLE001
-        log.exception("прогрев %s", pid)
-        state(warmup={"status": "error", "error": f"{type(e).__name__}: {e}"})
+        log.exception("%s %s", label, pid)
+        state(warmup={"status": "error", "kind": label, "error": f"{type(e).__name__}: {e}"})
 
 
 async def monitor_ip(p, pid: str, fwd: Forwarder, lookup, state) -> None:

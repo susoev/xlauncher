@@ -250,15 +250,24 @@ def warmup_start(pid: str, params: dict) -> dict:
     if st.get("status") == "running" and not st.get("cdp_port"):
         return {"ok": False, "error": "профиль открыт без доступа агента — закрой его, прогрев запустит его сам"}
     if (st.get("warmup") or {}).get("status") == "running" and st.get("status") == "running":
-        return {"ok": False, "error": "прогрев уже идёт"}
+        return {"ok": False, "error": "прогрев или дневной обход уже идёт"}
     req = {"action": "start", "count": int(params.get("count") or 10), "engine": params.get("engine") or "google",
            "include_yandex": bool(params.get("include_yandex")), "only": params.get("only")}
+    if params.get("mode") == "day_routine":
+        req["mode"] = "day_routine"
     if not runstate.is_active(pid):
         r = start(pid, bool(params.get("confirm_country")), agent=True)
         if not r.get("ok"):
             return r
+        # дневной обход закрывает профиль, только если сам его открыл: чужую работу в браузере не прерываем
+        req["close"] = req.get("mode") == "day_routine"
     runstate.request_warmup(pid, req)
     return {"ok": True, "queued": req}
+
+
+def day_routine_start(pid: str, params: dict | None = None) -> dict:
+    """Дневной обход: запустить профиль, 3–4 сайта через поиск Яндекса, листание, закрыть профиль."""
+    return warmup_start(pid, {**(params or {}), "mode": "day_routine"})
 
 
 def warmup_stop(pid: str) -> dict:

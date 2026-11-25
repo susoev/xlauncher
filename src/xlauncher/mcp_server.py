@@ -28,6 +28,8 @@ INSTRUCTIONS = """Управление профилями браузера XLaun
    спроси пользователя, можно ли перезапустить (restart=true).
 Прогрев профиля (накопить историю и куки перед регистрацией): warmup_profile — работает сам, следи через
 warmup_status. Не прогревай вручную через browser_* — это долго и дорого.
+Ежедневная активность профиля: day_routine — 3–4 сайта через поиск Яндекса, листание, профиль закрывается сам;
+итог — в launch_log (строки «day_routine: …»).
 
 3. Читать страницу экономно: browser_snapshot (по умолчанию только видимое на экране), browser_find("текст") —
    найти элемент, browser_click_text("текст") — найти и нажать одним вызовом. full=true в снимке — только если нужно.
@@ -276,6 +278,29 @@ def warmup_status(profile: str) -> str:
         lines.append(f"  {r['domain']}: {r.get('result')} ({r.get('via', '')}, {r.get('pages', 0)} стр., {r.get('sec', 0)} с)"
                      + (f" — {r['error']}" if r.get("error") else ""))
     return "\n".join(lines)
+
+
+@tool
+def day_routine(profile: str) -> str:
+    """Дневной обход: запускает профиль, ищет в Яндексе 3–4 случайных сайта из списка прогрева, листает их
+    и закрывает профиль. Работает сам, около 3–5 минут. Если профиль уже был открыт — не закрывает его.
+
+    Прогресс — warmup_status, пока профиль открыт; итог — launch_log (строки «day_routine: …»).
+    """
+    p = _resolve(profile)
+    r = api("POST", f"/api/profiles/{p['id']}/day-routine", {})
+    if r.get("ok") is False:
+        return f"Не запущен: {r.get('error')}"
+    tail = "закроется сам по окончании" if (r.get("queued") or {}).get("close") else "был открыт — останется открытым"
+    return f"Дневной обход запущен ({tail}). Итог — launch_log через 3–5 минут."
+
+
+@tool
+def launch_log(profile: str, limit: int = 20) -> str:
+    """Журнал запусков профиля, свежие сверху: запуски и остановки, прогрев, day_routine, действия агента."""
+    rows = api("GET", f"/api/profiles/{_resolve(profile)['id']}/launch-log")["log"][:max(1, min(limit, 60))]
+    return "\n".join(f"{r['time']}  {r['event']}  {'  '.join(d for d in r['details'] if d)}".rstrip()
+                     for r in rows) or "Журнал пуст"
 
 
 @tool

@@ -5,6 +5,10 @@
   случайное время на сайте из dwell_sec: листание с паузами, 1–2 внутренние ссылки → следующий сайт.
 Капча не проходится: сайт помечается и пропускается.
 
+day_routine — короткий ежедневный обход тем же механизмом: 3–4 сайта из того же списка через поиск
+Яндекса, листание без возвратов к вкладкам, после чего лаунчер закрывает профиль. Параметры — блок
+"day_routine" в sites.json.
+
 Выполняется в раннере профиля (переживает перезапуск окна лаунчера при обновлении).
 Требует запуска профиля с доступом агента (порт отладки).
 """
@@ -58,6 +62,16 @@ TIMING = {
     "final_round": True,                 # в конце вернуться ко всем открытым вкладкам
 }
 
+# Дневной обход (day_routine); переопределяется блоком "day_routine" в sites.json.
+DAY_ROUTINE = {
+    "sites": [3, 4],                     # сколько сайтов пройти, [от, до]
+    "engine": "yandex",                  # поисковик: yandex или google
+    "dwell_sec": [20, 40],               # сколько пробыть на сайте (вместо dwell_sec сайта)
+    "internal_pages": [0, 1],            # сколько внутренних страниц открыть
+    "between_sites_sec": [4, 12],        # пауза между сайтами
+    "include_yandex": True,              # сайты Яндекса (Дзен, Маркет): поиск и так идёт через Яндекс
+}
+
 # Органические ссылки на домен в выдаче (без рекламы).
 RESULT_JS = r"""(() => {
   const dom = %DOMAIN%;
@@ -109,6 +123,36 @@ def load_timing() -> dict:
     return {**TIMING, **(_load().get("timing") or {})}
 
 
+def load_day_routine() -> dict:
+    return {**DAY_ROUTINE, **(_load().get("day_routine") or {})}
+
+
+def day_routine_plan() -> tuple[list[dict], str, dict]:
+    """-> (сайты, поисковик, тайминги) для дневного обхода: сайты Яндекса пропускаются, вкладки не копятся."""
+    c = load_day_routine()
+    n = random.randint(int(c["sites"][0]), int(c["sites"][1]))
+    sites = [{**s, "dwell_sec": c["dwell_sec"]} for s in pick_weighted(n, bool(c.get("include_yandex")))]
+    engine = c["engine"] if c["engine"] in SEARCH else "yandex"
+    timing = {"internal_pages": c["internal_pages"], "between_sites_sec": c["between_sites_sec"],
+              "keep_tab_chance": 0, "final_round": False}
+    return sites, engine, timing
+
+
+def weight(site: dict) -> float:
+    """Вес сайта в случайном выборе дневного обхода: 1–10, без поля — 5."""
+    try:
+        return min(10.0, max(1.0, float(site.get("weight", 5))))
+    except (TypeError, ValueError):
+        return 5.0
+
+
+def pick_weighted(count: int, include_yandex: bool) -> list[dict]:
+    """count разных сайтов, шанс попасть в выборку пропорционален weight (Efraimidis–Spirakis)."""
+    sites = [s for s in load_sites() if include_yandex or not s.get("yandex")]
+    sites.sort(key=lambda s: random.random() ** (1 / weight(s)), reverse=True)
+    return sites[:count]
+
+
 def pick_sites(count: int, include_yandex: bool, only: list[str] | None = None) -> list[dict]:
     sites = load_sites()
     if only:
@@ -126,14 +170,16 @@ class Stopped(Exception):
 
 class Runner:
     def __init__(self, port: int, on_progress: Callable[[dict], None], stop: asyncio.Event,
-                 journal: Callable[[str], None] = lambda s: None):
+                 journal: Callable[[str], None] = lambda s: None, label: str = "прогрев",
+                 timing: dict | None = None):
         self.port = port
         self.on_progress = on_progress
         self.stop = stop
         self.journal = journal
         self.state: dict = {"status": "running", "done": 0, "total": 0, "current": None, "results": [],
                             "started": time.time()}
-        self.t = load_timing()
+        self.t = {**load_timing(), **(timing or {})}
+        self.label = label
         self.work_tab: str | None = None   # вкладка для поиска
         self.kept: list[dict] = []          # открытые сайты: {"tab", "domain"}
         self.in_revisit = False
@@ -394,7 +440,7 @@ class Runner:
                     r = {"domain": site["domain"], "name": site["name"], "result": "error", "error": str(e)[:200]}
                 self.state["results"].append(r)
                 self.state["done"] += 1
-                self.journal(f"прогрев: {r['domain']}\t{r['result']}\t{r.get('via', '')}\t"
+                self.journal(f"{self.label}: {r['domain']}\t{r['result']}\t{r.get('via', '')}\t"
                              f"{r.get('pages', 0)} стр.\t{r.get('sec', 0)} с")
                 self._emit()
                 if self.state["done"] < self.state["total"]:

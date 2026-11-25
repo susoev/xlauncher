@@ -48,6 +48,26 @@
     "revisit_click_chance": 0.4,
     "final_round": true
   },
+  "day_routine": {
+    "sites": [
+      3,
+      4
+    ],
+    "engine": "yandex",
+    "dwell_sec": [
+      20,
+      40
+    ],
+    "internal_pages": [
+      0,
+      1
+    ],
+    "between_sites_sec": [
+      4,
+      12
+    ],
+    "include_yandex": true
+  },
   "sites": [
     {
       "name": "2ГИС",
@@ -65,6 +85,7 @@
         "open_company_cards",
         "click_reviews_or_photos_tab"
       ],
+      "weight": 4,
       "yandex": false,
       "enabled": true
     },
@@ -84,6 +105,7 @@
         "open_company_card",
         "scroll_price_list"
       ],
+      "weight": 3,
       "yandex": false,
       "enabled": true
     },
@@ -103,6 +125,7 @@
         "open_specialist_profiles",
         "scroll_patient_reviews"
       ],
+      "weight": 3,
       "yandex": false,
       "enabled": true
     },
@@ -121,6 +144,7 @@
         "scroll_bank_offers",
         "open_news_article"
       ],
+      "weight": 3,
       "yandex": false,
       "enabled": true
     },
@@ -139,6 +163,7 @@
         "interact_calculator_params_without_submit",
         "scroll_page"
       ],
+      "weight": 3,
       "yandex": false,
       "enabled": true
     },
@@ -157,6 +182,7 @@
         "open_movie_card",
         "click_actors_tab"
       ],
+      "weight": 4,
       "yandex": false,
       "enabled": true
     },
@@ -175,6 +201,7 @@
         "open_articles_different_rubrics",
         "scroll_to_bottom"
       ],
+      "weight": 5,
       "yandex": false,
       "enabled": true
     },
@@ -193,6 +220,7 @@
         "smooth_scroll_article",
         "scroll_related_news"
       ],
+      "weight": 5,
       "yandex": false,
       "enabled": true
     },
@@ -211,6 +239,7 @@
         "open_analytical_article",
         "scroll_with_reading_pauses"
       ],
+      "weight": 5,
       "yandex": false,
       "enabled": true
     },
@@ -229,6 +258,7 @@
         "open_news_items",
         "click_tag_or_topic"
       ],
+      "weight": 5,
       "yandex": false,
       "enabled": true
     },
@@ -247,6 +277,7 @@
         "expand_longpost",
         "scroll_comments_branch"
       ],
+      "weight": 7,
       "yandex": false,
       "enabled": true
     },
@@ -265,6 +296,7 @@
         "scroll_with_reading_pauses",
         "scroll_to_comments"
       ],
+      "weight": 6,
       "yandex": false,
       "enabled": true
     },
@@ -283,6 +315,7 @@
         "open_business_or_marketing_case",
         "scroll_comments"
       ],
+      "weight": 7,
       "yandex": false,
       "enabled": true
     },
@@ -301,6 +334,7 @@
         "open_news_or_match_center",
         "scroll_feed"
       ],
+      "weight": 5,
       "yandex": false,
       "enabled": true
     },
@@ -319,6 +353,7 @@
         "scroll_media_embeds",
         "scroll_discussion"
       ],
+      "weight": 6,
       "yandex": false,
       "enabled": true
     },
@@ -337,6 +372,7 @@
         "open_articles_or_videos",
         "dwell_on_content"
       ],
+      "weight": 9,
       "yandex": true,
       "enabled": true
     },
@@ -356,6 +392,7 @@
         "open_product_cards",
         "browse_product_photos"
       ],
+      "weight": 5,
       "yandex": true,
       "enabled": true
     },
@@ -374,6 +411,7 @@
         "open_product_cards",
         "scroll_specs_and_reviews"
       ],
+      "weight": 6,
       "yandex": false,
       "enabled": true
     },
@@ -392,6 +430,7 @@
         "open_product_cards",
         "browse_photo_gallery"
       ],
+      "weight": 6,
       "yandex": false,
       "enabled": true
     },
@@ -410,6 +449,7 @@
         "open_category",
         "open_listings_and_scroll_photos"
       ],
+      "weight": 6,
       "yandex": false,
       "enabled": true
     },
@@ -427,6 +467,7 @@
         "open_public_groups_without_login",
         "scroll_wall_posts"
       ],
+      "weight": 10,
       "yandex": false,
       "enabled": true
     },
@@ -445,6 +486,7 @@
         "hover_weather_or_currency_widget",
         "open_news_item"
       ],
+      "weight": 6,
       "yandex": false,
       "enabled": true
     },
@@ -463,6 +505,7 @@
         "switch_forecast_tabs",
         "hover_weather_charts"
       ],
+      "weight": 4,
       "yandex": false,
       "enabled": true
     },
@@ -481,6 +524,7 @@
         "select_category",
         "click_external_site_links"
       ],
+      "weight": 1,
       "yandex": false,
       "enabled": true
     },
@@ -499,6 +543,7 @@
         "play_video_30_45_sec",
         "scroll_related_videos"
       ],
+      "weight": 7,
       "yandex": false,
       "enabled": true
     },
@@ -517,6 +562,7 @@
         "open_life_situations_or_help_article",
         "scroll_faq"
       ],
+      "weight": 2,
       "yandex": false,
       "enabled": true
     },
@@ -535,6 +581,7 @@
         "open_individuals_or_business_section",
         "open_public_service_info_page"
       ],
+      "weight": 1,
       "yandex": false,
       "enabled": true
     },
@@ -553,6 +600,7 @@
         "select_future_date",
         "view_train_schedule_without_booking"
       ],
+      "weight": 2,
       "yandex": false,
       "enabled": true
     },
@@ -571,6 +619,7 @@
         "enter_city_or_index",
         "scroll_tariffs"
       ],
+      "weight": 2,
       "yandex": false,
       "enabled": true
     },
@@ -590,6 +639,7 @@
         "open_2_vacancy_cards",
         "scroll_requirements"
       ],
+      "weight": 4,
       "yandex": false,
       "enabled": true
     },
@@ -609,6 +659,7 @@
         "open_2_listings",
         "browse_photos_and_map"
       ],
+      "weight": 3,
       "yandex": false,
       "enabled": true
     },
@@ -628,6 +679,7 @@
         "open_2_car_listings",
         "scroll_specs_and_reviews"
       ],
+      "weight": 3,
       "yandex": false,
       "enabled": true
     },
@@ -646,6 +698,45 @@
         "open_law_article",
         "scroll_document_text"
       ],
+      "weight": 1,
+      "yandex": false,
+      "enabled": true
+    },
+    {
+      "name": "TenChat",
+      "domain": "tenchat.ru",
+      "url": "https://tenchat.ru/",
+      "category": "Соцсети и порталы",
+      "query": "tenchat",
+      "dwell_sec": [
+        35,
+        55
+      ],
+      "actions": [
+        "scroll_feed",
+        "open_post",
+        "open_author_profile"
+      ],
+      "weight": 9,
+      "yandex": false,
+      "enabled": true
+    },
+    {
+      "name": "ВКонтакте (vk.ru)",
+      "domain": "vk.ru",
+      "url": "https://vk.ru/",
+      "category": "Соцсети и порталы",
+      "query": "vk.ru",
+      "dwell_sec": [
+        35,
+        55
+      ],
+      "actions": [
+        "scroll_feed",
+        "open_public_page",
+        "open_post"
+      ],
+      "weight": 9,
       "yandex": false,
       "enabled": true
     }
