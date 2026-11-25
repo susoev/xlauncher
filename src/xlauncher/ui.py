@@ -565,7 +565,7 @@ function renderRemote(r) {
     <div class="copyrow"><div class="code">${esc(tok)}</div>
       <button type="button" onclick="remoteShowToken=!remoteShowToken; refreshRemote()">${remoteShowToken ? 'Скрыть' : 'Показать'}</button>
       <button type="button" onclick="copyText(${JSON.stringify(r.token).replace(/"/g, '&quot;')})">Копировать</button></div>
-    <div class="hint"><button type="button" class="ghost danger" onclick="newRemoteToken()">Выпустить новый токен</button> — старый перестанет работать. Делай так после копирования папки лаунчера на другой компьютер.</div>
+    <div class="hint"><button type="button" class="danger" onclick="newRemoteToken()">Выпустить новый токен</button> — старый перестанет работать. Нужно, если токен мог утечь или доступ был включён до копирования папки на другой компьютер.</div>
     ${cmd ? `<label>Команда для агента (Claude Code на VPS)</label>
       <div class="copyrow"><div class="code">${esc(cmd)}</div><button type="button" onclick="copyText(${JSON.stringify(cmd).replace(/"/g, '&quot;')})">Копировать</button></div>` : ''}`;
 }

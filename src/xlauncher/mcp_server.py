@@ -29,8 +29,9 @@ INSTRUCTIONS = """Управление профилями браузера XLaun
 Прогрев профиля (накопить историю и куки перед регистрацией): warmup_profile — работает сам, следи через
 warmup_status. Не прогревай вручную через browser_* — это долго и дорого.
 
-3. browser_snapshot — прочитать страницу: текст и список элементов со ссылками вида [e123].
-4. browser_click / browser_type / browser_press_key / browser_scroll — действовать по ссылкам из последнего снимка.
+3. Читать страницу экономно: browser_snapshot (по умолчанию только видимое на экране), browser_find("текст") —
+   найти элемент, browser_click_text("текст") — найти и нажать одним вызовом. full=true в снимке — только если нужно.
+4. browser_click / browser_type / browser_press_key / browser_scroll — действовать по ссылкам [eNNN] из снимка или поиска.
    После действий, которые меняют страницу, делай новый снимок: ссылки на элементы устаревают.
 5. browser_screenshot — если нужна картинка (капча, вёрстка, медиа).
 
@@ -331,9 +332,35 @@ def browser_navigate(profile: str, url: str, tab: str | None = None, referrer: s
 
 
 @tool
-def browser_snapshot(profile: str, tab: str | None = None, text_limit: int = 3000) -> str:
-    """Снимок страницы: адрес, текст и интерактивные элементы со ссылками [eNNN] для click/type."""
-    return _b(profile, "snapshot", tab=tab, text_limit=text_limit)["text"]
+def browser_snapshot(profile: str, tab: str | None = None, full: bool = False, text_limit: int | None = None) -> str:
+    """Снимок страницы: адрес, текст и элементы со ссылками [eNNN] для click/type.
+
+    По умолчанию компактный — только то, что видно на экране (до 40 элементов). full=true — вся страница
+    (дорого, только когда действительно нужно). Чтобы найти конкретный элемент, дешевле browser_find.
+    """
+    return _b(profile, "snapshot", tab=tab, full=full, text_limit=text_limit)["text"]
+
+
+@tool
+def browser_find(profile: str, text: str, exact: bool = False, tab: str | None = None) -> str:
+    """Находит на странице элементы с текстом (кнопки, ссылки, поля; иначе любой текст) — без полного снимка.
+
+    Возвращает ссылки [eNNN] для browser_click/browser_type.
+    """
+    els = _b(profile, "find", text=text, exact=exact, tab=tab)["elements"]
+    if not els:
+        return f"Ничего не найдено по «{text}»"
+    return "\n".join(f"[{e['ref']}] {e['role']} «{e['name']}»" + (f" ({'; '.join(e['extra'])})" if e["extra"] else "")
+                     + ("" if e["inView"] else " [вне экрана]") for e in els)
+
+
+@tool
+def browser_click_text(profile: str, text: str, nth: int = 0, exact: bool = False, tab: str | None = None) -> str:
+    """Клик по элементу с текстом одним вызовом (nth — какой по счёту, если совпадений несколько; с 0)."""
+    r = _b(profile, "click_text", text=text, nth=nth, exact=exact, tab=tab)
+    c = r["clicked"]
+    more = f" (совпадений: {r['matches']})" if r["matches"] > 1 else ""
+    return f"Нажато {c['role']} «{c['name']}»{more}. Адрес: {r['url']}"
 
 
 @tool

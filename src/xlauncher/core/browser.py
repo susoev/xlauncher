@@ -36,8 +36,38 @@ COLLECT_JS = r"""(() => {
     out.push([el, inView, r.top]);
   }
   out.sort((a, b) => (b[1] - a[1]) || (a[2] - b[2]));
-  return out.slice(0, %MAX%).map(x => x[0]);
-})()""".replace("%MAX%", str(MAX_ELEMENTS))
+  return out.filter(x => !%ONLY_VIEW% || x[1]).slice(0, %MAX%).map(x => x[0]);
+})()"""
+
+# Поиск элементов по тексту: сначала интерактивные с подходящим именем, затем любой текст на странице
+# с ближайшим кликабельным предком.
+FIND_JS = r"""(() => {
+  const q = %QUERY%.toLowerCase().replace(/\s+/g, ' ').trim(), exact = %EXACT%;
+  const clean = s => (s || '').toLowerCase().replace(/\s+/g, ' ').trim();
+  const ok = s => exact ? clean(s) === q : clean(s).includes(q);
+  const visible = el => { const r = el.getBoundingClientRect(); const cs = getComputedStyle(el);
+    return r.width > 1 && r.height > 1 && cs.visibility !== 'hidden' && cs.display !== 'none'; };
+  const SEL = 'a[href], button, input:not([type=hidden]), textarea, select, summary, [role=button], [role=link], [role=tab],' +
+              '[role=menuitem], [role=option], [role=checkbox], [onclick], label';
+  const found = [];
+  for (const el of document.querySelectorAll(SEL)) {
+    const name = el.getAttribute('aria-label') || el.innerText || el.getAttribute('placeholder') || el.getAttribute('title') || el.value || '';
+    if (ok(name) && visible(el)) found.push(el);
+  }
+  if (!found.length) {
+    const w = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+    while (w.nextNode()) {
+      const t = w.currentNode;
+      if (!ok(t.nodeValue)) continue;
+      const el = t.parentElement.closest(SEL) || t.parentElement;
+      if (visible(el) && !found.includes(el)) found.push(el);
+      if (found.length >= 10) break;
+    }
+  }
+  const inView = el => { const r = el.getBoundingClientRect(); return r.bottom > 0 && r.top < innerHeight; };
+  found.sort((a, b) => inView(b) - inView(a));
+  return found.slice(0, 10);
+})()"""
 
 DESCRIBE_FN = r"""function () {
   const el = this, tag = el.tagName.toLowerCase();
@@ -294,38 +324,91 @@ async def _wait_ready(s: Session, timeout: float = 30) -> None:
         await asyncio.sleep(0.3)
 
 
-async def snapshot(port: int, tab: str | None = None, text_limit: int = 3000) -> dict:
+async def _describe(s: Session, oids: list[str]) -> list[dict]:
+    out = []
+    for oid in oids:
+        node = await s.send("DOM.describeNode", {"objectId": oid})
+        info = await s.call_on(oid, DESCRIBE_FN)
+        out.append({"ref": f"e{node['node']['backendNodeId']}", **info})
+    return out
+
+
+async def snapshot(port: int, tab: str | None = None, text_limit: int = 1500, full: bool = False) -> dict:
+    """Снимок страницы. По умолчанию компактный: только видимые элементы (до 40) и начало текста видимой части.
+
+    full=True — все элементы страницы (до 150) и больше текста.
+    """
+    js = COLLECT_JS.replace("%ONLY_VIEW%", "false" if full else "true").replace(
+        "%MAX%", str(MAX_ELEMENTS if full else 40))
     async with Session(port, tab) as s:
         ctx = await s.world()
-        arr = await s.eval(COLLECT_JS, by_value=False, ctx=ctx)
+        arr = await s.eval(js, by_value=False, ctx=ctx)
         props = await s.send("Runtime.getProperties", {"objectId": arr["objectId"], "ownProperties": True})
-        elements = []
-        for p in props["result"]:
-            if not p["name"].isdigit() or "objectId" not in p.get("value", {}):
-                continue
-            oid = p["value"]["objectId"]
-            node = await s.send("DOM.describeNode", {"objectId": oid})
-            info = await s.call_on(oid, DESCRIBE_FN)
-            elements.append({"ref": f"e{node['node']['backendNodeId']}", **info})
+        oids = [p["value"]["objectId"] for p in props["result"]
+                if p["name"].isdigit() and "objectId" in p.get("value", {})]
+        elements = await _describe(s, oids)
+        text_expr = ("(document.body ? document.body.innerText : '')" if full else VISIBLE_TEXT_JS)
         page = await s.eval("({title: document.title, url: location.href, "
-                            "text: (document.body ? document.body.innerText : '').replace(/\\n{3,}/g, '\\n\\n'),"
+                            f"text: ({text_expr}).replace(/\\n{{3,}}/g, '\\n\\n'),"
                             "scroll: [scrollY, document.documentElement.scrollHeight, innerHeight]})", ctx=ctx)
     text = page["text"]
     return {"tab": s.target["id"], "title": page["title"], "url": page["url"],
             "text": text[:text_limit] + ("…" if len(text) > text_limit else ""),
             "scroll": {"y": page["scroll"][0], "height": page["scroll"][1], "viewport": page["scroll"][2]},
-            "elements": elements}
+            "elements": elements, "full": full}
+
+
+# Текст только видимой части экрана: блоки, пересекающиеся с окном.
+VISIBLE_TEXT_JS = r"""(() => {
+  const out = [], seen = new Set();
+  const w = document.createTreeWalker(document.body || document.documentElement, NodeFilter.SHOW_TEXT);
+  while (w.nextNode()) {
+    const t = w.currentNode, v = t.nodeValue.trim();
+    if (!v || !t.parentElement) continue;
+    const el = t.parentElement, r = el.getBoundingClientRect();
+    if (r.bottom <= 0 || r.top >= innerHeight || r.width < 1 || seen.has(el)) continue;
+    const cs = getComputedStyle(el);
+    if (cs.visibility === 'hidden' || cs.display === 'none') continue;
+    seen.add(el); out.push(v);
+  }
+  return out.join('\n');
+})()"""
+
+
+async def find(port: int, text: str, exact: bool = False, tab: str | None = None) -> list[dict]:
+    """Элементы, содержащие текст (сначала кликабельные), без полного снимка страницы."""
+    js = FIND_JS.replace("%QUERY%", json.dumps(text)).replace("%EXACT%", "true" if exact else "false")
+    async with Session(port, tab) as s:
+        return await _describe(s, await s.find(js))
+
+
+async def click_text(port: int, text: str, nth: int = 0, exact: bool = False, tab: str | None = None) -> dict:
+    """Находит элемент по тексту и кликает по нему одним вызовом."""
+    js = FIND_JS.replace("%QUERY%", json.dumps(text)).replace("%EXACT%", "true" if exact else "false")
+    async with Session(port, tab) as s:
+        oids = await s.find(js)
+        if not oids:
+            raise BrowserError(f"на странице нет элемента с текстом «{text}»")
+        if nth >= len(oids):
+            raise BrowserError(f"найдено только {len(oids)} элементов с текстом «{text}»")
+        target = (await _describe(s, [oids[nth]]))[0]
+        if not await s.click_object(oids[nth]):
+            raise BrowserError(f"элемент «{text}» невидим")
+        await asyncio.sleep(0.8)
+        return {"clicked": target, "matches": len(oids), "url": await s.eval("location.href")}
 
 
 def format_snapshot(snap: dict) -> str:
+    full = snap.get("full")
     lines = [f"Вкладка {snap['tab'][:8]}: {snap['title']}", snap["url"],
              f"Прокрутка: {snap['scroll']['y']} из {snap['scroll']['height']} (окно {snap['scroll']['viewport']})", "",
-             "Элементы (ссылки для click/type):"]
+             "Элементы (ссылки для click/type):" if full else
+             "Видимые элементы (ссылки для click/type; вся страница — full=true, поиск — browser_find):"]
     for e in snap["elements"]:
         extra = f" ({'; '.join(e['extra'])})" if e["extra"] else ""
         off = "" if e["inView"] else " [вне экрана]"
         lines.append(f"[{e['ref']}] {e['role']} «{e['name']}»{extra}{off}")
-    lines += ["", "Текст страницы:", snap["text"]]
+    lines += ["", "Текст страницы:" if full else "Текст на экране:", snap["text"]]
     return "\n".join(lines)
 
 

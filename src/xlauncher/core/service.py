@@ -179,7 +179,7 @@ def open_folder(path: Path) -> dict:
 # ---------------------------------------------------------------- браузер для агентов
 
 BROWSER_ACTIONS = {"tabs", "new_tab", "activate_tab", "close_tab", "navigate", "snapshot", "click", "type", "press_key",
-                   "scroll", "screenshot", "wait"}
+                   "scroll", "screenshot", "wait", "find", "click_text"}
 
 
 def browser_action(pid: str, action: str, args: dict) -> dict:
@@ -212,8 +212,13 @@ def browser_action(pid: str, action: str, args: dict) -> dict:
         elif action == "navigate":
             res = _run_async(browser.navigate(port, args["url"], tab, args.get("referrer")))
         elif action == "snapshot":
-            snap = _run_async(browser.snapshot(port, tab, int(args.get("text_limit") or 3000)))
+            full = bool(args.get("full"))
+            snap = _run_async(browser.snapshot(port, tab, int(args.get("text_limit") or (3000 if full else 1500)), full))
             res = {"text": browser.format_snapshot(snap), "url": snap["url"], "title": snap["title"]}
+        elif action == "find":
+            res = {"elements": _run_async(browser.find(port, args["text"], bool(args.get("exact")), tab))}
+        elif action == "click_text":
+            res = _run_async(browser.click_text(port, args["text"], int(args.get("nth") or 0), bool(args.get("exact")), tab))
         elif action == "click":
             res = _run_async(browser.click(port, args["ref"], tab))
         elif action == "type":

@@ -94,3 +94,27 @@ def test_click_multiline_link_hits_text_not_gap(chrome):
         assert r["url"].endswith("/two.html"), r
 
     asyncio.run(go())
+
+
+def test_compact_snapshot_find_and_click_text(chrome):
+    async def go():
+        base = b.tabs(chrome)[0]["url"].rsplit("/", 1)[0]
+        await b.navigate(chrome, base + "/index.html")
+        compact = await b.snapshot(chrome)
+        full = await b.snapshot(chrome, full=True)
+        assert all(e["inView"] for e in compact["elements"]) and len(compact["elements"]) <= 40
+        assert len(full["elements"]) >= len(compact["elements"])
+        assert "Текст на экране" in b.format_snapshot(compact)
+
+        found = await b.find(chrome, "войти")
+        assert found and found[0]["role"] == "кнопка"
+        await b.type_text(chrome, (await b.find(chrome, "Логин"))[0]["ref"], "Агент")
+        r = await b.click_text(chrome, "Войти")
+        assert r["clicked"]["name"] == "Войти"
+        assert (await b.wait_for(chrome, "Привет, Агент (trusted)", 5))["found"]
+        with pytest.raises(b.BrowserError, match="нет элемента"):
+            await b.click_text(chrome, "такого текста нет")
+        r = await b.click_text(chrome, "Дальше")
+        assert r["url"].endswith("/two.html")
+
+    asyncio.run(go())
