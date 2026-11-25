@@ -47,7 +47,7 @@ def chrome(tmp_path_factory):
                              f"--user-data-dir={tmp_path_factory.mktemp('ud')}", f"--remote-debugging-port={cdp}",
                              f"http://127.0.0.1:{srv.server_address[1]}/"],
                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    for _ in range(100):
+    for _ in range(300):  # до ~60 с: на CI Chrome иногда стартует долго
         try:
             if b.tabs(cdp):
                 break

@@ -60,6 +60,8 @@ TIMING = {
     "revisit_sec": [8, 25],              # сколько пробыть на вкладке при возврате
     "revisit_click_chance": 0.4,         # вероятность перейти там по внутренней ссылке
     "final_round": True,                 # в конце вернуться ко всем открытым вкладкам
+    "search_fallback": "",               # капча на поиске → дальше через этот поисковик
+    "stop_on_search_captcha": False,     # капча на поиске (и на запасном) → закончить обход
 }
 
 # Дневной обход (day_routine); переопределяется блоком "day_routine" в sites.json.
@@ -70,6 +72,7 @@ DAY_ROUTINE = {
     "internal_pages": [0, 1],            # сколько внутренних страниц открыть
     "between_sites_sec": [4, 12],        # пауза между сайтами
     "include_yandex": True,              # сайты Яндекса (Дзен, Маркет): поиск и так идёт через Яндекс
+    "fallback_engine": "google",         # капча на поиске → остальные сайты через этот поисковик ("" — не переключаться)
 }
 
 # Органические ссылки на домен в выдаче (без рекламы).
@@ -128,13 +131,18 @@ def load_day_routine() -> dict:
 
 
 def day_routine_plan() -> tuple[list[dict], str, dict]:
-    """-> (сайты, поисковик, тайминги) для дневного обхода: сайты Яндекса пропускаются, вкладки не копятся."""
+    """-> (сайты, поисковик, тайминги) для дневного обхода: выбор по весу, вкладки не копятся.
+
+    В таймингах — правила капчи на поиске: переключиться на fallback_engine, а если и там капча — остановиться.
+    """
     c = load_day_routine()
     n = random.randint(int(c["sites"][0]), int(c["sites"][1]))
     sites = [{**s, "dwell_sec": c["dwell_sec"]} for s in pick_weighted(n, bool(c.get("include_yandex")))]
     engine = c["engine"] if c["engine"] in SEARCH else "yandex"
+    fallback = c.get("fallback_engine") or ""
     timing = {"internal_pages": c["internal_pages"], "between_sites_sec": c["between_sites_sec"],
-              "keep_tab_chance": 0, "final_round": False}
+              "keep_tab_chance": 0, "final_round": False, "stop_on_search_captcha": True,
+              "search_fallback": fallback if fallback in SEARCH and fallback != engine else ""}
     return sites, engine, timing
 
 
@@ -397,7 +405,7 @@ class Runner:
         res = {"domain": site["domain"], "name": site["name"], "via": engine}
         url = await self.search(engine, site.get("query") or site["domain"])
         if self.is_captcha(url):
-            res.update(result="captcha", where=f"поиск {engine}")
+            res.update(result="captcha", where=f"поиск {engine}", search_captcha=True)
             return res
         tab = await self.open_result(site["domain"])
         if tab is None:
@@ -422,6 +430,15 @@ class Runner:
         res["sec"] = round(time.monotonic() - t0)
         return res
 
+    async def _visit_safe(self, site: dict, engine: str) -> dict:
+        try:
+            return await self.visit(site, engine)
+        except Stopped:
+            raise
+        except Exception as e:  # noqa: BLE001
+            log.warning("%s %s: %s", self.label, site["domain"], e)
+            return {"domain": site["domain"], "name": site["name"], "result": "error", "error": str(e)[:200]}
+
     async def run(self, sites: list[dict], engine: str) -> dict:
         self.state["total"] = len(sites)
         self._emit()
@@ -431,18 +448,23 @@ class Runner:
                     raise Stopped()
                 self.state["current"] = site["domain"]
                 self._emit()
-                try:
-                    r = await self.visit(site, engine)
-                except Stopped:
-                    raise
-                except Exception as e:  # noqa: BLE001
-                    log.warning("прогрев %s: %s", site["domain"], e)
-                    r = {"domain": site["domain"], "name": site["name"], "result": "error", "error": str(e)[:200]}
+                r = await self._visit_safe(site, engine)
+                fb = self.t.get("search_fallback")
+                if r.get("search_captcha") and fb and fb != engine:
+                    self.journal(f"{self.label}: капча на поиске {engine} → дальше через {fb}")
+                    engine = fb
+                    self.state["engine"] = engine
+                    r = await self._visit_safe(site, engine)
                 self.state["results"].append(r)
                 self.state["done"] += 1
                 self.journal(f"{self.label}: {r['domain']}\t{r['result']}\t{r.get('via', '')}\t"
                              f"{r.get('pages', 0)} стр.\t{r.get('sec', 0)} с")
                 self._emit()
+                if r.get("search_captcha") and self.t.get("stop_on_search_captcha"):
+                    self.state["stopped_reason"] = f"капча на поиске {engine}"
+                    self.journal(f"{self.label}: капча на поиске {engine}, обход остановлен"
+                                 f" ({self.state['total'] - self.state['done']} сайтов пропущено)")
+                    break
                 if self.state["done"] < self.state["total"]:
                     if self.kept and random.random() < float(self.t["revisit_chance"]):
                         await self.revisit()

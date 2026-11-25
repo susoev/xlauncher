@@ -84,7 +84,7 @@ def test_warmup_via_search_skips_ads(tmp_path, monkeypatch, xl_root):
                              f"--user-data-dir={tmp_path / 'ud'}", f"--remote-debugging-port={cdp}", "about:blank"],
                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     try:
-        for _ in range(100):
+        for _ in range(300):
             try:
                 if b.tabs(cdp):
                     break
@@ -164,7 +164,7 @@ def test_day_routine_via_yandex(tmp_path, monkeypatch, xl_root):
                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     journal = []
     try:
-        for _ in range(100):
+        for _ in range(300):
             try:
                 if b.tabs(cdp):
                     break
@@ -210,3 +210,93 @@ def test_builtin_sites_have_weights():
     w = {s["domain"]: s["weight"] for s in d["sites"]}
     assert all(isinstance(v, int) and 1 <= v <= 10 for v in w.values()), w
     assert min(w["vk.com"], w["tenchat.ru"], w["dzen.ru"]) > w["rbc.ru"] > w["nalog.gov.ru"]
+
+
+def _two_engines(tmp_path, monkeypatch, yandex_captcha, google_captcha):
+    """Локальные «Яндекс» и «Google»: каждый либо ищет, либо сразу показывает капчу."""
+    site = tmp_path / "site"
+    site.mkdir()
+    (site / "index.html").write_text('<meta charset="utf-8"><title>Сайт</title><div style="height:3000px"></div>',
+                                     encoding="utf-8")
+    site_srv = _serve(site, [])
+    sport = site_srv.server_address[1]
+    servers, hits = [site_srv], {}
+    for name, field, captcha in (("yandex", "text", yandex_captcha), ("google", "q", google_captcha)):
+        d = tmp_path / name
+        d.mkdir()
+        (d / "showcaptcha.html").write_text('<meta charset="utf-8"><title>Вы не робот?</title>', encoding="utf-8")
+        home = ('<meta charset="utf-8"><script>location = "/showcaptcha.html"</script>' if captcha else
+                f'<meta charset="utf-8"><input name="{field}" style="width:300px" onkeydown="if (event.key === \'Enter\') '
+                f'location = \'/search.html?{field}=\' + encodeURIComponent(this.value)">')
+        (d / "home.html").write_text(home, encoding="utf-8")
+        (d / "search.html").write_text(f'<meta charset="utf-8"><a href="http://localhost:{sport}/index.html">'
+                                       '<span>Тестовый сайт localhost</span></a>', encoding="utf-8")
+        hits[name] = []
+        srv = _serve(d, hits[name])
+        servers.append(srv)
+        monkeypatch.setitem(warmup.SEARCH, name, {"home": f"http://127.0.0.1:{srv.server_address[1]}/home.html",
+                                                  "input": f"input[name={field}]"})
+    sites = [{"name": f"Тест {i}", "domain": "localhost", "url": f"http://localhost:{sport}/index.html",
+              "query": f"тест {i}", "enabled": True} for i in range(5)]
+    return sites, servers, hits
+
+
+def _run_day(tmp_path, monkeypatch, xl_root, sites):
+    (xl_root / "warmup").mkdir()
+    (xl_root / "warmup" / "sites.json").write_text(json.dumps({
+        "sites": sites, "day_routine": {"sites": [3, 3], "dwell_sec": [4, 5], "between_sites_sec": [1, 2]}}),
+        encoding="utf-8")
+
+    async def fast_pause(self, a, c):
+        if self.stop.is_set():
+            raise warmup.Stopped()
+        await asyncio.sleep(min(a, c) / 4)
+
+    monkeypatch.setattr(warmup.Runner, "pause", fast_pause)
+    cdp = _port()
+    proc = subprocess.Popen([CHROME, "--headless=new", "--no-sandbox", "--no-first-run",
+                             f"--user-data-dir={tmp_path / 'ud'}", f"--remote-debugging-port={cdp}", "about:blank"],
+                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    journal = []
+    try:
+        for _ in range(300):
+            try:
+                if b.tabs(cdp):
+                    break
+            except Exception:
+                time.sleep(0.2)
+        picked, engine, timing = warmup.day_routine_plan()
+        r = warmup.Runner(cdp, lambda st: None, asyncio.Event(), journal.append, label="day_routine", timing=timing)
+        return asyncio.run(r.run(picked, engine)), journal
+    finally:
+        proc.terminate()
+        proc.wait(10)
+
+
+def test_day_routine_falls_back_to_google_on_yandex_captcha(tmp_path, monkeypatch, xl_root):
+    sites, servers, hits = _two_engines(tmp_path, monkeypatch, yandex_captcha=True, google_captcha=False)
+    try:
+        res, journal = _run_day(tmp_path, monkeypatch, xl_root, sites)
+    finally:
+        for s in servers:
+            s.shutdown()
+    assert res["status"] == "done", res
+    assert [r["via"] for r in res["results"]] == ["google"] * 3, res["results"]
+    assert all(r["result"] == "ok" for r in res["results"]), res["results"]
+    assert "day_routine: капча на поиске yandex → дальше через google" in journal
+    assert sum(h == "/home.html" for h in hits["yandex"]) == 1  # в Яндекс больше не ходили
+    assert sum(h.startswith("/search.html?q=") for h in hits["google"]) == 3
+
+
+def test_day_routine_stops_when_both_engines_captcha(tmp_path, monkeypatch, xl_root):
+    sites, servers, hits = _two_engines(tmp_path, monkeypatch, yandex_captcha=True, google_captcha=True)
+    try:
+        res, journal = _run_day(tmp_path, monkeypatch, xl_root, sites)
+    finally:
+        for s in servers:
+            s.shutdown()
+    assert res["status"] == "done", res
+    assert len(res["results"]) == 1 and res["results"][0]["result"] == "captcha", res["results"]
+    assert res["stopped_reason"] == "капча на поиске google"
+    assert journal[-1] == "day_routine: капча на поиске google, обход остановлен (2 сайтов пропущено)", journal
+    assert sum(h == "/home.html" for h in hits["yandex"]) == 1 and sum(h == "/home.html" for h in hits["google"]) == 1
