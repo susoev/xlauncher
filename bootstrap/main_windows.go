@@ -29,6 +29,8 @@ const (
 	errAlreadyExists = 183
 )
 
+var minimized bool
+
 var (
 	kernel32        = syscall.NewLazyDLL("kernel32.dll")
 	user32          = syscall.NewLazyDLL("user32.dll")
@@ -70,6 +72,12 @@ func main() {
 	// Работает параллельно с окном лаунчера, поэтому до проверки «один экземпляр».
 	if len(os.Args) > 1 && os.Args[1] == "--mcp" {
 		os.Exit(runMCP(root))
+	}
+
+	for _, a := range os.Args[1:] {
+		if a == "--minimized" {
+			minimized = true
+		}
 	}
 
 	// Один экземпляр на пользователя Windows.
@@ -179,6 +187,10 @@ func launch(root, ver string) (int, bool) {
 		"XL_ROOT="+root,
 		fmt.Sprintf("XL_BOOTSTRAP_VERSION=%d", bootstrapVersion),
 	)
+	if minimized {
+		cmd.Env = append(cmd.Env, "XL_MINIMIZED=1") // автозапуск с Windows: окно свёрнуто
+		minimized = false                           // только для первого запуска, не после обновлений
+	}
 	if err := cmd.Start(); err != nil {
 		log.Printf("не удалось запустить %s: %v", ver, err)
 		return -1, false

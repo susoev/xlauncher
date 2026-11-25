@@ -11,6 +11,7 @@ from __future__ import annotations
 import ctypes
 import json
 import os
+import platform
 import sys
 import time
 from pathlib import Path
@@ -70,7 +71,7 @@ def pid_alive(pid: int | None) -> bool:
 def write(pid: str, **fields) -> dict:
     paths.run_dir().mkdir(parents=True, exist_ok=True)
     cur = read_raw(pid) or {}
-    cur.update(fields, protocol=PROTOCOL, heartbeat=time.time())
+    cur.update(fields, protocol=PROTOCOL, heartbeat=time.time(), host=platform.node())
     paths.write_atomic(state_file(pid), json.dumps(cur, ensure_ascii=False))
     return cur
 
@@ -87,6 +88,8 @@ def read(pid: str) -> dict | None:
     st = read_raw(pid)
     if not st:
         return None
+    if st.get("host") and st["host"] != platform.node():
+        return None  # папку скопировали с другого компьютера — это не наш запуск
     if st.get("status") in ACTIVE:
         fresh = time.time() - st.get("heartbeat", 0) < STALE_S
         if not (fresh and pid_alive(st.get("runner_pid"))):

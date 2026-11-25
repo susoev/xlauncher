@@ -47,6 +47,7 @@ def create_app(updater: "Updater | None") -> FastAPI:
             "engine": service.engine_status(),
             "audit": service.uniqueness.auditor.state,
             "bootstrap_version": updater.bootstrap_version() if updater else None,
+            "host": __import__("platform").node(),
         }
 
     @app.post("/api/ui-ping")
@@ -158,6 +159,35 @@ def create_app(updater: "Updater | None") -> FastAPI:
             body["monitor_interval_min"] = v
         settings.save(body)
         return settings.load()
+
+    @app.get("/api/remote")
+    def remote_status() -> dict:
+        from .core import remote
+
+        return {**remote.server.status(), "autostart": service.autostart_get()}
+
+    @app.post("/api/remote")
+    def remote_update(body: dict = Body(...)) -> dict:
+        from .core import remote
+
+        vals = {}
+        if "enabled" in body:
+            vals["enabled"] = bool(body["enabled"])
+            if vals["enabled"] and not remote.config()["token"]:
+                vals["token"] = remote.new_token()
+        if "port" in body:
+            port = int(body["port"])
+            if not 1024 <= port <= 65535:
+                raise ValueError("порт — от 1024 до 65535")
+            vals["port"] = port
+        if body.get("new_token"):
+            vals["token"] = remote.new_token()
+        if vals:
+            remote.save(vals)
+            remote.server.apply()
+        if "autostart" in body:
+            service.autostart_set(bool(body["autostart"]))
+        return {**remote.server.status(), "autostart": service.autostart_get()}
 
     @app.post("/api/proxy/check")
     def check_proxy(body: dict = Body(...)) -> dict:

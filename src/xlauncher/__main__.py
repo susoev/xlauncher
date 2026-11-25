@@ -86,7 +86,9 @@ def selftest() -> int:
     import websockets  # noqa: F401
 
     from . import mcp_server  # noqa: F401
-    from .core import browser, warmup  # noqa: F401
+    from .core import browser, remote, warmup  # noqa: F401
+
+    assert remote.client_allowed("100.64.0.1") and not remote.client_allowed("8.8.8.8")
 
     assert len(warmup.load_sites()) > 10 and warmup.load_timing()["between_sites_sec"]
 
@@ -155,6 +157,13 @@ def main() -> int:
         updater.cleanup()
         updater.start()
 
+    try:
+        from .core import remote
+
+        remote.server.apply()  # MCP по HTTP для агентов с других машин, если включён в настройках
+    except Exception:  # noqa: BLE001
+        log.exception("удалённый доступ не запустился")
+
     def watch_show_requests() -> None:
         f = paths.run_dir() / "show-request"
         while not restart.is_set():
@@ -204,7 +213,8 @@ def main() -> int:
     try:
         import webview
 
-        window_ref["w"] = webview.create_window("XLauncher", url, width=1040, height=700, min_size=(720, 480))
+        window_ref["w"] = webview.create_window("XLauncher", url, width=1040, height=700, min_size=(720, 480),
+                                                minimized=os.environ.get("XL_MINIMIZED") == "1")
         webview.start(icon=icon)
     except Exception:  # noqa: BLE001
         log.exception("окно не открылось — открываю интерфейс в браузере по умолчанию")

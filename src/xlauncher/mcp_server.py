@@ -38,7 +38,13 @@ warmup_status. Не прогревай вручную через browser_* — �
 удаляй ничего без явного подтверждения пользователя. Не вводи пароли и коды — попроси пользователя сделать это.
 Действуй в темпе человека, без массовых операций. Все действия записываются в журнал профиля."""
 
-mcp = MCPServer("xlauncher", instructions=INSTRUCTIONS)
+TOOLS: list = []
+
+
+def tool(fn):
+    """Регистрирует инструмент; сервер собирается в build() — для stdio и для HTTP (удалённый доступ)."""
+    TOOLS.append(fn)
+    return fn
 
 
 # ---------------------------------------------------------------- связь с приложением
@@ -127,13 +133,32 @@ def _status_line(p: dict) -> str:
     ip = st.get("ip") or (p.get("last_ip") or {}).get("ip") or "—"
     country = ((st.get("geo") or {}).get("country") if st.get("ip") else (p.get("last_ip") or {}).get("country")) or ""
     agent = ", доступ агента" if st.get("cdp_port") else ""
-    return f"{p['name']} [{p.get('group') or 'без клиента'}] id={p['id']} статус={s}{agent} IP={ip} {country}".strip()
+    elsewhere = f", последний запуск на компьютере {p['last_host_other']}" if p.get("last_host_other") else ""
+    return (f"{p['name']} [{p.get('group') or 'без клиента'}] id={p['id']} статус={s}{agent} IP={ip} {country}"
+            f"{elsewhere}").strip()
+
+
+# ---------------------------------------------------------------- компьютер
+
+
+@tool
+def machine_info() -> str:
+    """Какой это компьютер: имя, версия XLauncher, браузер, сколько профилей и сколько запущено.
+
+    Если у тебя подключено несколько XLauncher (разные компьютеры), сверяйся, что работаешь на нужном.
+    """
+    st = api("GET", "/api/status")
+    items = api("GET", "/api/profiles")["profiles"]
+    running = [p["name"] for p in items if (p.get("state") or {}).get("status") == "running"]
+    return (f"компьютер: {st.get('host')}\nXLauncher {st.get('version')}, браузер {st['engine']['version']}"
+            f"{'' if st['engine']['installed'] else ' (не скачан)'}\nпрофилей: {len(items)}, запущено: {len(running)}"
+            + (f" ({', '.join(running)})" if running else ""))
 
 
 # ---------------------------------------------------------------- профили
 
 
-@mcp.tool()
+@tool
 def list_profiles(query: str = "") -> str:
     """Список профилей с клиентом, статусом и последним IP. query — фильтр по имени или клиенту."""
     items = api("GET", "/api/profiles")["profiles"]
@@ -142,7 +167,7 @@ def list_profiles(query: str = "") -> str:
     return "\n".join(_status_line(p) for p in items) or "Профилей нет"
 
 
-@mcp.tool()
+@tool
 def profile_status(profile: str) -> str:
     """Подробный статус профиля: прокси, IP, страна, предупреждения, ошибки последнего запуска."""
     p = _resolve(profile)
@@ -157,7 +182,7 @@ def profile_status(profile: str) -> str:
     return "\n".join(lines)
 
 
-@mcp.tool()
+@tool
 def start_profile(profile: str, restart: bool = False, confirm_country: bool = False) -> str:
     """Запускает профиль с доступом агента и ждёт, пока браузер откроется (до 90 с).
 
@@ -196,7 +221,7 @@ def start_profile(profile: str, restart: bool = False, confirm_country: bool = F
     return "Браузер не открылся за 90 секунд — проверь профиль в окне XLauncher."
 
 
-@mcp.tool()
+@tool
 def stop_profile(profile: str) -> str:
     """Закрывает браузер профиля (как крестиком: куки и сессия сохраняются)."""
     p = _resolve(profile)
@@ -209,7 +234,7 @@ def stop_profile(profile: str) -> str:
     return "Команда отправлена, браузер ещё закрывается."
 
 
-@mcp.tool()
+@tool
 def ip_history(profile: str) -> str:
     """История внешних IP профиля (строка появляется только при смене IP)."""
     p = _resolve(profile)
@@ -221,7 +246,7 @@ def ip_history(profile: str) -> str:
 # ---------------------------------------------------------------- прогрев
 
 
-@mcp.tool()
+@tool
 def warmup_profile(profile: str, count: int = 10, engine: str = "google", include_yandex: bool = False) -> str:
     """Запускает встроенный прогрев: обход count сайтов из списка через поиск (engine: google или yandex).
 
@@ -237,7 +262,7 @@ def warmup_profile(profile: str, count: int = 10, engine: str = "google", includ
     return f"Прогрев запущен: {count} сайтов через {engine}. Проверяй warmup_status раз в несколько минут."
 
 
-@mcp.tool()
+@tool
 def warmup_status(profile: str) -> str:
     """Прогресс и итоги прогрева: сколько сайтов пройдено, где были капчи."""
     p = api("GET", f"/api/profiles/{_resolve(profile)['id']}")
@@ -252,7 +277,7 @@ def warmup_status(profile: str) -> str:
     return "\n".join(lines)
 
 
-@mcp.tool()
+@tool
 def warmup_stop(profile: str) -> str:
     """Останавливает прогрев (браузер остаётся открытым)."""
     api("POST", f"/api/profiles/{_resolve(profile)['id']}/warmup/stop")
@@ -267,35 +292,35 @@ def _b(profile: str, action: str, **args) -> dict:
     return api("POST", f"/api/profiles/{p['id']}/browser/{action}", {k: v for k, v in args.items() if v is not None})
 
 
-@mcp.tool()
+@tool
 def browser_tabs(profile: str) -> str:
     """Открытые вкладки браузера профиля. Первая — последняя активная, по умолчанию действия идут в неё."""
     tabs = _b(profile, "tabs")["tabs"]
     return "\n".join(f"{t['id'][:8]}  {t['title']}  {t['url']}" for t in tabs) or "Вкладок нет"
 
 
-@mcp.tool()
+@tool
 def browser_new_tab(profile: str, url: str = "about:blank") -> str:
     """Открывает новую вкладку."""
     t = _b(profile, "new_tab", url=url)
     return f"Открыта вкладка {t['id'][:8]}: {t['url']}"
 
 
-@mcp.tool()
+@tool
 def browser_switch_tab(profile: str, tab: str) -> str:
     """Делает вкладку активной (tab — id из browser_tabs, можно первые 8 символов)."""
     _b(profile, "activate_tab", tab=tab)
     return "Готово"
 
 
-@mcp.tool()
+@tool
 def browser_close_tab(profile: str, tab: str) -> str:
     """Закрывает вкладку."""
     _b(profile, "close_tab", tab=tab)
     return "Закрыта"
 
 
-@mcp.tool()
+@tool
 def browser_navigate(profile: str, url: str, tab: str | None = None, referrer: str | None = None) -> str:
     """Открывает адрес во вкладке и ждёт загрузки. referrer — откуда «пришёл» переход (например, https://www.google.com/).
 
@@ -305,13 +330,13 @@ def browser_navigate(profile: str, url: str, tab: str | None = None, referrer: s
     return f"Открыто: {r['title']} — {r['url']}"
 
 
-@mcp.tool()
+@tool
 def browser_snapshot(profile: str, tab: str | None = None, text_limit: int = 3000) -> str:
     """Снимок страницы: адрес, текст и интерактивные элементы со ссылками [eNNN] для click/type."""
     return _b(profile, "snapshot", tab=tab, text_limit=text_limit)["text"]
 
 
-@mcp.tool()
+@tool
 def browser_click(profile: str, ref: str, tab: str | None = None) -> str:
     """Клик мышью по элементу (ref из последнего снимка, например e123)."""
     r = _b(profile, "click", ref=ref, tab=tab)
@@ -319,7 +344,7 @@ def browser_click(profile: str, ref: str, tab: str | None = None) -> str:
     return f"Нажато {ref}. Адрес: {r['url']}{scale}"
 
 
-@mcp.tool()
+@tool
 def browser_type(profile: str, ref: str, text: str, submit: bool = False, clear: bool = True,
                  tab: str | None = None) -> str:
     """Вводит текст в поле: клик, очистка (clear), ввод; submit=true — нажать Enter. Пароли не вводи."""
@@ -327,21 +352,21 @@ def browser_type(profile: str, ref: str, text: str, submit: bool = False, clear:
     return f"Введено в {ref}" + (" и отправлено" if submit else "")
 
 
-@mcp.tool()
+@tool
 def browser_press_key(profile: str, key: str, tab: str | None = None) -> str:
     """Нажимает клавишу: Enter, Tab, Escape, Backspace, Delete, ArrowDown/Up/Left/Right, PageDown/Up, Home, End, Space."""
     _b(profile, "press_key", key=key, tab=tab)
     return f"Нажата {key}"
 
 
-@mcp.tool()
+@tool
 def browser_scroll(profile: str, dy: int = 600, tab: str | None = None) -> str:
     """Прокрутка колесом мыши: dy > 0 — вниз, dy < 0 — вверх (в пикселях)."""
     r = _b(profile, "scroll", dy=dy, tab=tab)
     return f"Прокручено, позиция {r['y']}"
 
 
-@mcp.tool()
+@tool
 def browser_screenshot(profile: str, tab: str | None = None) -> Image:
     """Скриншот видимой части страницы (JPEG)."""
     import base64
@@ -350,7 +375,7 @@ def browser_screenshot(profile: str, tab: str | None = None) -> Image:
     return Image(data=base64.b64decode(r["jpeg_base64"]), format="jpeg")
 
 
-@mcp.tool()
+@tool
 def browser_wait(profile: str, text: str | None = None, seconds: float = 2, tab: str | None = None) -> str:
     """Ждёт появления текста на странице (до seconds, максимум 60) или просто пауза, если text не задан."""
     r = _b(profile, "wait", text=text, seconds=seconds, tab=tab)
@@ -359,8 +384,15 @@ def browser_wait(profile: str, text: str | None = None, seconds: float = 2, tab:
     return f"Подождал {seconds} с"
 
 
+def build() -> MCPServer:
+    m = MCPServer("xlauncher", instructions=INSTRUCTIONS)
+    for fn in TOOLS:
+        m.tool()(fn)
+    return m
+
+
 def main() -> None:
-    mcp.run("stdio")
+    build().run("stdio")
 
 
 if __name__ == "__main__":

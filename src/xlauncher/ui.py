@@ -121,6 +121,11 @@ dialog::backdrop { background:rgba(15,18,28,.4); }
 .dlg label { display:block; font-size:12.5px; color:var(--ink2); margin:14px 0 5px; }
 .dlg .btns { display:flex; gap:8px; justify-content:flex-end; margin-top:20px; }
 .dlg .hint { font-size:12.5px; color:var(--ink3); margin-top:5px; }
+.dlg label.check { display:flex; gap:8px; align-items:center; color:var(--ink); font-size:14px; margin-top:14px; }
+.dlg label.check input { width:auto; }
+.code { font:12.5px/1.45 Consolas, "Cascadia Mono", monospace; background:var(--paper); border:1px solid var(--line); border-radius:var(--radius-s);
+        padding:8px 10px; overflow-wrap:anywhere; user-select:all; }
+.copyrow { display:flex; gap:6px; align-items:flex-start; margin-top:6px; } .copyrow .code { flex:1; }
 .inline { display:flex; gap:6px; }
 .inline input { flex:1; }
 #checkResult { font-size:13px; margin-top:7px; }
@@ -179,6 +184,12 @@ dialog::backdrop { background:rgba(15,18,28,.4); }
 <dialog id="settings"><div class="dlg">
   <h3>Настройки</h3>
   <label for="s_monitor">Проверять IP открытого профиля каждые, минут</label><input id="s_monitor" type="number" min="1" max="120">
+  <label class="check"><input type="checkbox" id="s_autostart"> Запускать XLauncher вместе с Windows (окно свёрнуто)</label>
+  <section style="margin-top:22px"><h2>Удалённый доступ для агентов</h2>
+    <div class="small muted">Агенты на других твоих машинах (например, Claude на VPS) смогут управлять профилями этого компьютера через Tailscale. Нужен токен; из интернета порт недоступен.</div>
+    <label class="check"><input type="checkbox" id="r_enabled"> Включить</label>
+    <div id="r_body"></div>
+  </section>
   <section style="margin-top:20px"><dl class="kv small" id="s_info"></dl></section>
   <div class="btns"><button type="button" onclick="api('POST','/api/open-root').catch(e => toast(e.message))">Открыть папку лаунчера</button><span class="spacer"></span>
     <button type="button" onclick="$('settings').close()">Закрыть</button><button type="button" class="primary" onclick="saveSettings()">Сохранить</button></div>
@@ -321,7 +332,7 @@ function renderDetail() {
   const SRC = {launch:'при запуске', monitor:'во время работы', create:'при создании'};
   setHTML($('detail'), `<div class="inner">
     <div class="dhead">${glyph(fp.seed, 72)}<div><h1>${esc(p.name)}</h1>
-      <div class="group-name">${esc(p.group || 'Без клиента')}</div>
+      <div class="group-name">${esc(p.group || 'Без клиента')}${p.last_host_other ? ` <span class="small" style="color:var(--caution)">последний запуск на компьютере ${esc(p.last_host_other)}</span>` : ''}</div>
       <div class="status ${v.cls}"><i></i>${esc(statusLine)}</div></div>${big}</div>
     ${alert}
     <section><h2>Сеть</h2><dl class="kv">
@@ -535,11 +546,42 @@ async function saveForm() {
   btn.disabled = false; btn.textContent = editing ? 'Сохранить' : 'Создать профиль';
   load(); if (selected) loadDetailExtras(selected, true);
 }
+function copyText(t) { navigator.clipboard.writeText(t).then(() => toast('Скопировано', 'ok', 2000), () => toast('Не удалось скопировать')); }
+let remoteShowToken = false;
+function renderRemote(r) {
+  $('r_enabled').checked = r.enabled; $('s_autostart').checked = r.autostart;
+  if (!r.enabled) { $('r_body').innerHTML = ''; return; }
+  const tok = remoteShowToken ? r.token : r.token.slice(0, 6) + '•'.repeat(20);
+  const name = 'xlauncher-' + (r.host || 'pc').toLowerCase().replace(/[^a-z0-9-]/g, '');
+  const url = r.urls[0];
+  const cmd = url ? `claude mcp add --transport http ${name} ${url} --header "Authorization: Bearer ${r.token}"` : '';
+  $('r_body').innerHTML = `
+    ${r.error ? `<div class="alert alarm small">${esc(r.error)}</div>` : ''}
+    <label>Состояние</label><div class="small">${r.running ? `<span class="ok">работает на порту ${r.port}</span>` : '<span class="bad">не запущен</span>'}</div>
+    <label>Адрес для агентов</label>
+    ${r.urls.length ? r.urls.map(u => `<div class="copyrow"><div class="code">${esc(u)}</div><button type="button" onclick="copyText('${esc(u)}')">Копировать</button></div>`).join('')
+      : '<div class="small bad">Tailscale на этом компьютере не найден или не подключён. Установи и войди в тот же аккаунт, что и на VPS.</div>'}
+    <label>Токен</label>
+    <div class="copyrow"><div class="code">${esc(tok)}</div>
+      <button type="button" onclick="remoteShowToken=!remoteShowToken; refreshRemote()">${remoteShowToken ? 'Скрыть' : 'Показать'}</button>
+      <button type="button" onclick="copyText(${JSON.stringify(r.token).replace(/"/g, '&quot;')})">Копировать</button></div>
+    <div class="hint"><button type="button" class="ghost danger" onclick="newRemoteToken()">Выпустить новый токен</button> — старый перестанет работать. Делай так после копирования папки лаунчера на другой компьютер.</div>
+    ${cmd ? `<label>Команда для агента (Claude Code на VPS)</label>
+      <div class="copyrow"><div class="code">${esc(cmd)}</div><button type="button" onclick="copyText(${JSON.stringify(cmd).replace(/"/g, '&quot;')})">Копировать</button></div>` : ''}`;
+}
+async function refreshRemote() { try { renderRemote(await api('GET', '/api/remote')); } catch (e) { toast(e.message); } }
+async function newRemoteToken() {
+  if (!await ask('Выпустить новый токен?', 'Агенты со старым токеном потеряют доступ к этому компьютеру, пока ты не обновишь им команду подключения.', {ok:'Выпустить', danger:true})) return;
+  try { renderRemote(await api('POST', '/api/remote', {new_token: true})); toast('Новый токен выпущен', 'ok'); } catch (e) { toast(e.message); }
+}
 async function openSettings() {
   const st = await api('GET', '/api/settings');
   $('s_monitor').value = st.monitor_interval_min;
+  remoteShowToken = false; refreshRemote();
+  $('r_enabled').onchange = async () => { try { renderRemote(await api('POST', '/api/remote', {enabled: $('r_enabled').checked})); } catch (e) { toast(e.message); } };
+  $('s_autostart').onchange = async () => { try { renderRemote(await api('POST', '/api/remote', {autostart: $('s_autostart').checked})); toast($('s_autostart').checked ? 'XLauncher будет запускаться вместе с Windows' : 'Автозапуск выключен', 'ok', 3000); } catch (e) { toast(e.message); $('s_autostart').checked = !$('s_autostart').checked; } };
   const e = status.engine || {};
-  $('s_info').innerHTML = `<dt>Папка</dt><dd>${esc(status.root)}</dd><dt>Версия</dt><dd class="num">${esc(status.version)}</dd>
+  $('s_info').innerHTML = `<dt>Компьютер</dt><dd>${esc(status.host || '')}</dd><dt>Папка</dt><dd>${esc(status.root)}</dd><dt>Версия</dt><dd class="num">${esc(status.version)}</dd>
     <dt>Загрузчик</dt><dd>${esc(status.bootstrap_version ?? '—')}</dd><dt>Браузер</dt><dd class="num">${esc(e.version)} ${e.installed ? '' : '(не скачан)'}</dd>
     <dt>Обновления</dt><dd>${esc((status.updater || {}).last_check || '—')}</dd>`;
   $('settings').showModal();

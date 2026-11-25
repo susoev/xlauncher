@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import platform
 import subprocess
 import sys
 from pathlib import Path
@@ -24,6 +25,8 @@ def profile_view(p: profiles.Profile, duplicate: bool = False) -> dict:
     d["state"] = runstate.read(p.id)
     d["last_ip"] = iphistory.last(p.dir)
     d["duplicate"] = duplicate
+    last_host = (p.data.get("machine") or {}).get("last_host")
+    d["last_host_other"] = last_host if last_host and last_host != platform.node() else None
     return d
 
 
@@ -262,3 +265,41 @@ def warmup_sites() -> list[dict]:
     from . import warmup
 
     return warmup.load_sites()
+
+
+# ---------------------------------------------------------------- автозапуск
+
+
+RUN_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
+
+
+def autostart_get() -> bool:
+    if sys.platform != "win32":
+        return False
+    import winreg
+
+    try:
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, RUN_KEY) as k:
+            winreg.QueryValueEx(k, "XLauncher")
+            return True
+    except OSError:
+        return False
+
+
+def autostart_set(on: bool) -> bool:
+    if sys.platform != "win32":
+        raise ValueError("автозапуск настраивается только на Windows")
+    import winreg
+
+    from .. import paths
+
+    exe = paths.root() / "xlauncher.exe"
+    with winreg.CreateKeyEx(winreg.HKEY_CURRENT_USER, RUN_KEY, 0, winreg.KEY_WRITE) as k:
+        if on:
+            winreg.SetValueEx(k, "XLauncher", 0, winreg.REG_SZ, f'"{exe}" --minimized')
+        else:
+            try:
+                winreg.DeleteValue(k, "XLauncher")
+            except FileNotFoundError:
+                pass
+    return autostart_get()
