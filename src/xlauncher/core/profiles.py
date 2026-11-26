@@ -238,3 +238,34 @@ def touch_machine(p: Profile, engine_version: str) -> None:
     p.data["machine"] = {"last_host": platform.node(),
                          "last_launch": datetime.now().astimezone().isoformat(timespec="seconds")}
     p.save()
+
+
+_stats_cache: dict[str, tuple[float, int, dict]] = {}
+
+
+def launch_stats(p: Profile) -> dict:
+    """Сколько раз профиль запускали и когда последний раз — по launch.log (строки «запуск…»).
+
+    {"count": 11, "last": "2026-11-26 13:41:05"}; кеш по времени изменения файла — список опрашивается часто."""
+    f = p.dir / "launch.log"
+    try:
+        st = f.stat()
+    except OSError:
+        return {"count": 0, "last": None}
+    key = str(f)
+    hit = _stats_cache.get(key)
+    if hit and hit[0] == st.st_mtime and hit[1] == st.st_size:
+        return hit[2]
+    count, last = 0, None
+    try:
+        with open(f, encoding="utf-8", errors="replace") as fh:
+            for line in fh:
+                parts = line.rstrip("\n").split("\t")
+                if len(parts) > 1 and parts[1].startswith("запуск"):
+                    count += 1
+                    last = parts[0]
+    except OSError:
+        pass
+    res = {"count": count, "last": last}
+    _stats_cache[key] = (st.st_mtime, st.st_size, res)
+    return res

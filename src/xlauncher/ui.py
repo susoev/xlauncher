@@ -290,6 +290,14 @@ function matches(p) {
   const ip = (p.state && p.state.ip) || (p.last_ip && p.last_ip.ip) || '';
   return [p.name, p.group, ip, p.proxy_masked, p.notes].join(' ').toLowerCase().includes(query);
 }
+// «26.11.26 13:41 [11] » — последний запуск и сколько всего было запусков
+function launchStat(p) {
+  const l = p.launches || {};
+  if (!l.count) return '';
+  const m = /^(\d{4})-(\d\d)-(\d\d) (\d\d:\d\d)/.exec(l.last || '');
+  const when = m ? `${m[3]}.${m[2]}.${m[1].slice(2)} ${m[4]} ` : '';
+  return `<span class="faint num" title="Последний запуск и сколько раз профиль запускали">${when}[${l.count}]</span> `;
+}
 function renderList() {
   $('c_all').textContent = profiles.length || '';
   $('c_run').textContent = profiles.filter(p => view(p).active).length || '';
@@ -308,7 +316,7 @@ function renderList() {
       const cc = st.status === 'running' ? (st.geo || {}).country : (p.last_ip || {}).country;
       const sub = v.alarm ? `<span class="alarmtxt">${esc(v.text)}</span>`
                 : v.active ? `<span class="${v.cls === 'run' ? 'runtxt' : 'waittxt'}">${esc(v.text)}</span> <span class="num">${esc(ip || '')}</span>`
-                : ip ? `<span class="num">${esc(ip)}</span> ${esc(cc || '')}` : '<span class="faint">ещё не запускался</span>';
+                : ip ? `${launchStat(p)}<span class="num">${esc(ip)}</span> ${esc(cc || '')}` : '<span class="faint">ещё не запускался</span>';
       const btn = v.active
         ? `<button class="go stop ghost" title="Остановить" onclick="event.stopPropagation(); act('${p.id}','stop')"><svg viewBox="0 0 14 14"><rect x="2" y="2" width="10" height="10" rx="1.5" fill="currentColor"/></svg></button>`
         : `<button class="go ghost" title="Запустить" ${p.duplicate ? 'disabled' : ''} onclick="event.stopPropagation(); act('${p.id}','start')"><svg viewBox="0 0 14 14"><path d="M3.5 2l8.5 5-8.5 5z" fill="currentColor"/></svg></button>`;

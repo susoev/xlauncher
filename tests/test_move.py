@@ -301,3 +301,12 @@ def test_api_export_key_and_frozen_status(relay, monkeypatch):
     assert key.startswith("XL1-") and c.get("/api/move/remote").json()["status"] == "waiting"
     assert c.post("/api/move/export/cancel").json()["status"] == "cancelled"
     assert c.get("/api/status").json()["move"]["export"] is None
+
+
+def test_launch_stats_in_profile_list():
+    p = profiles.create("Счётчик")
+    assert service.list_profiles()["profiles"][0]["launches"] == {"count": 0, "last": None}
+    (p.dir / "launch.log").write_text(
+        "2026-11-20 10:00:00\tзапуск\t1.2.3.4\tRU\n2026-11-20 11:00:00\tостановлен\n"
+        "2026-11-26 13:41:05\tзапуск агентом\t1.2.3.4\tRU\n2026-11-26 13:50:00\tday_routine: старт\n", encoding="utf-8")
+    assert service.list_profiles()["profiles"][0]["launches"] == {"count": 2, "last": "2026-11-26 13:41:05"}

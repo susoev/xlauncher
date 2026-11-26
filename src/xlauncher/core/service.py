@@ -24,6 +24,7 @@ def profile_view(p: profiles.Profile, duplicate: bool = False) -> dict:
     d.pop("proxy", None)
     d["state"] = runstate.read(p.id)
     d["last_ip"] = iphistory.last(p.dir)
+    d["launches"] = profiles.launch_stats(p)
     d["duplicate"] = duplicate
     last_host = (p.data.get("machine") or {}).get("last_host")
     d["last_host_other"] = last_host if last_host and last_host != platform.node() else None
