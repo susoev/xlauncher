@@ -108,18 +108,18 @@ def selftest() -> int:
     c = TestClient(create_app(None), raise_server_exceptions=False)
     for body in ({"relay": "127.0.0.1:9"}, {"discover": True}):  # нет релея — понятная ошибка, а не 500
         r = c.post("/api/move/relay", json=body)
-        print(f"selftest move relay {body}: {r.status_code} {r.text[:200]}")
+        print(f"selftest move relay {body}: {r.status_code}", r.text[:200].encode("ascii", "backslashreplace").decode())
         assert r.status_code == 400, r.text
 
     from .core import firewall
 
     if firewall.supported():  # скрипт проверки брандмауэра должен отрабатывать без прав администратора
         fw = firewall.check(47111)
-        print(f"selftest firewall: {fw}")
+        print("selftest firewall:", ascii(fw))
         assert fw.get("ok") is not None, fw
         if os.environ.get("GITHUB_ACTIONS") == "true":  # CI: раннер — администратор
             r = firewall.selftest_fix(47111)
-            print(f"selftest firewall fix: {r}")
+            print("selftest firewall fix:", ascii(r))
             assert r["result"].startswith("ok") and r["check"]["ok"] is True, r
 
     fp = fingerprint.generate("RU")
