@@ -6,12 +6,14 @@
 //   - запускает версию из app\current.txt и ждёт от неё сигнала готовности (run\ready-<версия>);
 //   - не дождался — помечает версию сбойной (app\bad.txt) и откатывается на app\previous.txt;
 //   - код выхода 75 — приложение обновилось и просит перезапуск;
+//   - код выхода 76 + run\wipe-request.json — профили переехали, папку очистить (wipe.go);
 //   - работает в одном экземпляре; повторный запуск просит открытое окно показаться.
 package main
 
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"os/exec"
@@ -30,6 +32,8 @@ const (
 )
 
 var minimized bool
+
+var logFile *os.File
 
 var (
 	kernel32        = syscall.NewLazyDLL("kernel32.dll")
@@ -64,6 +68,7 @@ func main() {
 	lf, err := os.OpenFile(filepath.Join(root, "logs", "bootstrap.log"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
 	if err == nil {
 		log.SetOutput(lf)
+		logFile = lf
 		defer lf.Close()
 	}
 	log.SetFlags(log.LstdFlags)
@@ -99,6 +104,12 @@ func main() {
 	info, _ := json.Marshal(map[string]any{"version": bootstrapVersion, "pid": os.Getpid()})
 	os.WriteFile(filepath.Join(root, "run", "bootstrap.json"), info, 0o644)
 	os.Remove(filepath.Join(root, "xlauncher.old.exe")) // остался от прошлой подмены загрузчика
+
+	if req, ok := readWipeRequest(root); ok { // очистка после переезда была прервана — доделать
+		releaseMutex()
+		doWipe(root, req)
+		return
+	}
 
 	appDir := filepath.Join(root, "app")
 	current := filepath.Join(appDir, "current.txt")
@@ -149,6 +160,15 @@ func main() {
 				return
 			}
 			continue
+
+		case code == exitWipe:
+			if req, ok := readWipeRequest(root); ok {
+				releaseMutex()
+				doWipe(root, req)
+				return
+			}
+			log.Print("код 76 без запроса на очистку — просто выхожу")
+			return
 
 		case code == 0:
 			return
@@ -254,4 +274,33 @@ func runMCP(root string) int {
 		return 1
 	}
 	return 0
+}
+
+// doWipe — очистка папки после переезда: всё, кроме xlauncher.exe (и MOVE.txt, если попросили).
+func doWipe(root string, req *wipeRequest) {
+	log.Printf("очистка после переезда: оставить %v", req.Keep)
+	if logFile != nil { // журнал тоже удаляется: файл должен быть закрыт
+		log.SetOutput(io.Discard)
+		logFile.Close()
+		logFile = nil
+	}
+	left, err := wipeWithRetry(root, req.Keep, 60*time.Second)
+	switch {
+	case err != nil:
+		messageBox(fmt.Sprintf("Очистка не выполнена: %v", err))
+	case len(left) > 0:
+		messageBox(fmt.Sprintf("Не всё удалось удалить: %v\n\nЗакройте программы, которые могут использовать эти файлы, и запустите xlauncher.exe ещё раз — очистка продолжится.", left))
+	default:
+		msg := "Готово. Профили переехали на другой компьютер, данные XLauncher на этом компьютере удалены."
+		if exists(filepath.Join(root, "MOVE.txt")) {
+			msg += "\n\nКлюч переезда — в " + filepath.Join(root, "MOVE.txt")
+		}
+		infoBox(msg)
+	}
+}
+
+func infoBox(text string) {
+	t, _ := syscall.UTF16PtrFromString(text)
+	c, _ := syscall.UTF16PtrFromString("xlauncher")
+	procMessageBox.Call(0, uintptr(unsafe.Pointer(t)), uintptr(unsafe.Pointer(c)), 0x40) // MB_ICONINFORMATION
 }

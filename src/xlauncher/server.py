@@ -57,7 +57,8 @@ def create_app(updater: "Updater | None") -> FastAPI:
             "host": __import__("platform").node(),
             "tailscale": tailscale.current(),
             "firewall": _firewall_status(),
-            "move": {"export": (move.load_state() or {}).get("phase"), "pending": len(move.pending_imports())},
+            "move": {"export": (_ms := move.load_state() or {}).get("phase"), "pull": bool(_ms.get("pull")),
+                     "pending": len(move.pending_imports())},
         }
 
     @app.get("/api/tailscale")
@@ -201,7 +202,10 @@ def create_app(updater: "Updater | None") -> FastAPI:
 
     @app.get("/api/move/status")
     def move_status() -> dict:
+        from .core import pull
+
         return {"job": move.job.snapshot(), "export": move.export_summary(), "relay": move.relay_setting(),
+                "pull": pull.pull_public(), "paired": bool(pull.pair()),
                 "pending_confirms": len(move.pending_imports()), "tailscale": tailscale.current()}
 
     @app.get("/api/move/estimate")
@@ -267,6 +271,65 @@ def create_app(updater: "Updater | None") -> FastAPI:
     def move_import_cancel(body: dict = Body(...)) -> dict:
         move.job.cancel()
         move.cancel_import(str(body.get("key") or ""))
+        return {"ok": True}
+
+    @app.post("/api/move/finish")
+    def move_finish(body: dict = Body(...)) -> dict:
+        return move.finish(str(body.get("confirm") or ""))
+
+    # «Забрать сюда»: связка машин
+    @app.get("/api/move/pair")
+    def move_pair() -> dict:
+        from .core import pull
+
+        p = pull.pair()
+        return {"paired": bool(p), "code": p.code if p else None, "relay": p.relay if p else move.relay_setting()}
+
+    @app.post("/api/move/pair")
+    def move_pair_set(body: dict = Body(...)) -> dict:
+        from .core import pull
+
+        if body.get("new"):
+            relay = str(body.get("relay") or move.relay_setting() or "")
+            if not relay:
+                raise move.MoveError("укажите адрес сервера переезда")
+            code = pull.new_pair_code(relay)
+        else:
+            code = str(body.get("code") or "")
+        pull.set_pair(code)
+        return move_pair()
+
+    @app.post("/api/move/pair/clear")
+    def move_pair_clear() -> dict:
+        from .core import pull
+
+        return pull.clear_pair()
+
+    @app.get("/api/move/devices")
+    def move_devices() -> dict:
+        from .core import pull
+
+        return pull.devices()
+
+    @app.post("/api/move/pull")
+    def move_pull(body: dict = Body(...)) -> dict:
+        from .core import pull
+
+        return pull.start_pull(str(body.get("target") or ""))
+
+    @app.post("/api/move/pull/cancel")
+    def move_pull_cancel() -> dict:
+        from .core import pull
+
+        return pull.cancel_pull()
+
+    @app.post("/api/move/pull/clear")
+    def move_pull_clear() -> dict:
+        from .core import pull
+
+        st = pull.load_pull()
+        if st and st.get("phase") in ("done", "error", "cancelled"):
+            pull.pull_path().unlink(missing_ok=True)
         return {"ok": True}
 
     @app.get("/api/remote")

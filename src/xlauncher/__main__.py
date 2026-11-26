@@ -148,6 +148,19 @@ def main() -> int:
     restart = threading.Event()
     window_ref: dict = {}
 
+    from . import lifecycle
+
+    def on_exit_request() -> None:
+        restart.set()  # будит ожидание в режиме «интерфейс в браузере»
+        w = window_ref.get("w")
+        if w is not None:
+            try:
+                w.destroy()
+            except Exception:  # noqa: BLE001
+                pass
+
+    lifecycle.register(on_exit_request)
+
     def on_update_ready(v: str) -> None:
         log.info("обновление %s установлено — перезапуск", v)
         restart.set()
@@ -196,6 +209,12 @@ def main() -> int:
             log.exception("переезд: подтверждение")
 
     threading.Thread(target=move_confirms, name="move-confirm", daemon=True).start()
+    try:
+        from .core import pull
+
+        pull.worker.start()  # связка машин: heartbeat и запросы «Забрать сюда»
+    except Exception:  # noqa: BLE001
+        log.exception("связка машин не запустилась")
 
     def watch_show_requests() -> None:
         f = paths.run_dir() / "show-request"
@@ -254,6 +273,9 @@ def main() -> int:
         webbrowser.open(url)
         restart.wait()
 
+    if lifecycle.exit_code is not None:
+        log.info("выход с кодом %s", lifecycle.exit_code)
+        return lifecycle.exit_code
     return EXIT_RESTART if restart.is_set() else 0
 
 

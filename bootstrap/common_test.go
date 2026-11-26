@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -73,5 +74,56 @@ func TestInstallApp(t *testing.T) {
 	bad.AppSHA256 = "00"
 	if err := installApp(filepath.Join(dir, "root2"), &bad); err == nil {
 		t.Fatal("ожидалась ошибка SHA-256")
+	}
+}
+
+func fakeRoot(t *testing.T) string {
+	root := filepath.Join(t.TempDir(), "xl")
+	for _, d := range []string{"app/2026.1.1.1/python", "profiles/a/data", "run", "logs", "engine"} {
+		os.MkdirAll(filepath.Join(root, d), 0o755)
+	}
+	for _, f := range []string{"xlauncher.exe", "MOVE.txt", "settings.json", "profiles/a/profile.json", "run/wipe-request.json"} {
+		os.WriteFile(filepath.Join(root, f), []byte("x"), 0o644)
+	}
+	return root
+}
+
+func TestWipeKeepsOnlyExeAndMoveTxt(t *testing.T) {
+	root := fakeRoot(t)
+	left, err := wipeRoot(root, []string{"xlauncher.exe", "MOVE.txt", "settings.json", "../etc"})
+	if err != nil || len(left) != 0 {
+		t.Fatalf("wipe: %v %v", left, err)
+	}
+	entries, _ := os.ReadDir(root)
+	var names []string
+	for _, e := range entries {
+		names = append(names, e.Name())
+	}
+	if strings.Join(names, ",") != "MOVE.txt,xlauncher.exe" {
+		t.Fatalf("осталось: %v", names)
+	}
+}
+
+func TestWipeWithoutMoveTxt(t *testing.T) {
+	root := fakeRoot(t)
+	if _, err := wipeRoot(root, []string{"xlauncher.exe"}); err != nil {
+		t.Fatal(err)
+	}
+	if exists(filepath.Join(root, "MOVE.txt")) || !exists(filepath.Join(root, "xlauncher.exe")) {
+		t.Fatal("MOVE.txt должен удалиться, exe — остаться")
+	}
+}
+
+func TestWipeRefusesDangerousRoots(t *testing.T) {
+	home, _ := os.UserHomeDir()
+	bare := t.TempDir() // без xlauncher.exe и app
+	os.WriteFile(filepath.Join(bare, "important.txt"), []byte("x"), 0o644)
+	for _, r := range []string{"/", home, filepath.Dir(home), bare} {
+		if _, err := wipeRoot(r, nil); err == nil {
+			t.Fatalf("очистка %s должна быть отклонена", r)
+		}
+	}
+	if !exists(filepath.Join(bare, "important.txt")) {
+		t.Fatal("тронут файл в чужой папке")
 	}
 }

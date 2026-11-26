@@ -30,6 +30,7 @@ import re
 import secrets
 import shutil
 import socket
+import sys
 import threading
 import time
 import zipfile
@@ -489,7 +490,7 @@ def _check_all_stopped(profile_ids: list[str] | None = None) -> None:
 
 
 def export(relay: str, profile_ids: list[str] | None = None, progress: Progress | None = None,
-           cancel: threading.Event | None = None) -> dict:
+           cancel: threading.Event | None = None, pull: dict | None = None) -> dict:
     """Упаковать, зашифровать, загрузить на релей. Возвращает состояние (ключ — в st['key'])."""
     if load_state():
         raise MoveError("уже есть незавершённый переезд — продолжите или отмените его")
@@ -540,6 +541,8 @@ def export(relay: str, profile_ids: list[str] | None = None, progress: Progress 
         "profiles": [{"id": p["id"], "name": p["name"]} for p in manifest["profiles"]],
         "plain_bytes": src.size,
     }
+    if pull:
+        st["pull"] = pull  # профили забирает другая машина связки: ключ ей, MOVE.txt не нужен
     save_state(st)  # с этого момента профили заморожены
     return upload(progress, cancel)
 
@@ -598,7 +601,8 @@ def upload(progress: Progress | None = None, cancel: threading.Event | None = No
         raise MoveError("хеши на сервере не совпали с отправленными — данные не считаются отправленными")
     st.update(phase="sent", sent=datetime.now().astimezone().isoformat(timespec="seconds"))
     save_state(st)
-    _write_move_txt(st)
+    if not st.get("pull"):
+        _write_move_txt(st)
     shutil.rmtree(out, ignore_errors=True)
     log.info("переезд отправлен: %s профилей, пакет %s…", len(st["profiles"]), pid[:8])
     return st
@@ -622,6 +626,49 @@ def cancel_export() -> dict:
     move_txt().unlink(missing_ok=True)
     log.info("переезд отменён")
     return {"ok": True, "status": status}
+
+
+def finish(confirm: str | None = None, auto: bool = False) -> dict:
+    """Очистить этот компьютер после переезда: приложение выходит с кодом 76, загрузчик удаляет папку.
+
+    Вручную (push) — по последним 4 знакам ключа. Автоматически (pull) — только когда сервер ответил,
+    что другая машина всё скачала, проверила и подтвердила."""
+    from .. import lifecycle
+
+    st = load_state()
+    if not st or st.get("phase") != "sent":
+        raise MoveError("нечего завершать: переезд не отправлен")
+    if auto:
+        if remote_status() != "confirmed":
+            raise MoveError("другая машина ещё не подтвердила приём")
+    elif (confirm or "").strip().upper() != key_id(st["key"]):
+        raise MoveError("последние 4 знака ключа не совпали")
+    if lifecycle.bootstrap_version() < 5:
+        raise MoveError("загрузчик устарел для очистки — перезапустите XLauncher (он обновится сам) и повторите")
+    items, _ = profiles.load_all()
+    running = [p.data.get("name") or p.id for p in items if runstate.is_active(p.id)]
+    if running:
+        raise MoveError("запущены профили: " + ", ".join(running[:5]))
+    from . import policies, remote
+
+    try:
+        remote.server.stop()
+    except Exception:  # noqa: BLE001
+        log.exception("остановка удалённого доступа")
+    if sys.platform == "win32":
+        from . import service
+
+        for fn in (lambda: service.autostart_set(False), policies.remove):
+            try:
+                fn()
+            except Exception:  # noqa: BLE001
+                log.exception("очистка реестра")
+    keep = ["xlauncher.exe"] if st.get("pull") else ["xlauncher.exe", "MOVE.txt"]
+    paths.write_atomic(paths.run_dir() / "wipe-request.json",
+                       json.dumps({"keep": keep, "package": st["package_id"][:8], "time": time.time()}))
+    log.warning("очистка компьютера после переезда: приложение выходит, загрузчик удаляет данные")
+    threading.Timer(1.0, lifecycle.request_exit, args=(lifecycle.EXIT_WIPE,)).start()  # ответ API успеет уйти
+    return {"ok": True}
 
 
 def remote_status() -> str | None:
@@ -1022,6 +1069,7 @@ def export_summary() -> dict | None:
     if not st:
         return None
     return {"phase": st["phase"], "created": st["created"], "sent": st.get("sent"), "relay": st["relay"],
+            "pull": {k: v for k, v in (st.get("pull") or {}).items() if k in ("to_name", "req")} or None,
             "profiles": st["profiles"], "cipher_bytes": st["cipher_bytes"], "key_id": key_id(st["key"]),
             "move_txt": str(move_txt())}
 

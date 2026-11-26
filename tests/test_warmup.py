@@ -43,9 +43,10 @@ def test_warmup_via_search_skips_ads(tmp_path, monkeypatch, xl_root):
     site_hits, search_hits = [], []
     site = tmp_path / "site"
     site.mkdir()
-    links = "".join(f'<p><a href="/a{i}.html">Интересная статья номер {i} про всё</a></p>' for i in range(5))
-    (site / "index.html").write_text(f'<meta charset="utf-8"><title>Сайт</title><h1>Главная</h1>{links}'
-                                     '<div style="height:3000px"></div>', encoding="utf-8")
+    # ссылки по всей высоте: к моменту перехода страница уже пролистана, ссылка должна быть на экране
+    links = "".join(f'<p><a href="/a{i % 5}.html">Интересная статья номер {i} про всё</a></p><div style="height:250px"></div>'
+                    for i in range(15))
+    (site / "index.html").write_text(f'<meta charset="utf-8"><title>Сайт</title><h1>Главная</h1>{links}', encoding="utf-8")
     for i in range(5):
         (site / f"a{i}.html").write_text(f'<meta charset="utf-8"><title>Статья {i}</title><p>Текст</p>'
                                          '<div style="height:3000px"></div>', encoding="utf-8")

@@ -130,10 +130,13 @@ dialog::backdrop { background:rgba(15,18,28,.4); }
 .inline input { flex:1; }
 #checkResult { font-size:13px; margin-top:7px; }
 .ok { color:var(--run); } .bad { color:var(--alarm); }
-.mvtabs { padding:0; border:0; margin:6px 0 4px; }
+.mvtabs { padding:0; border:0; margin:6px 0 4px; } .mvtabs button:focus:not(:focus-visible) { outline:none; }
 .mvchecks { list-style:none; padding:0; margin:10px 0 0; } .mvchecks li { padding:4px 0; display:flex; gap:8px; align-items:baseline; flex-wrap:wrap; }
 .mvchecks li b { width:16px; display:inline-block; }
 .mvkey { font-size:15px; letter-spacing:.3px; }
+.mvdanger { margin-top:16px; padding:12px 14px; border-radius:var(--radius-m); background:var(--alarmbg); color:var(--alarm); font-weight:700; }
+.mvdanger input { margin-top:8px; width:120px; font:600 15px Consolas, monospace; letter-spacing:2px; text-transform:uppercase; }
+button.danger-fill { background:var(--alarm); border-color:var(--alarm); color:#fff; font-weight:600; }
 .mvlist { max-height:180px; overflow:auto; border:1px solid var(--line); border-radius:var(--radius-s); padding:6px 10px; margin-top:6px; font-size:13px; }
 .mvlist div { padding:2px 0; display:flex; gap:8px; align-items:center; } .mvlist select { margin-left:auto; }
 textarea#mv_key { min-height:64px; font:13px Consolas, "Cascadia Mono", monospace; }
@@ -207,14 +210,15 @@ textarea#mv_key { min-height:64px; font:13px Consolas, "Cascadia Mono", monospac
   <h3>Переезд на другой компьютер</h3>
   <div class="filters mvtabs" role="group" aria-label="Режим">
     <button data-mv="send" aria-pressed="true" onclick="mvTab('send')">Отправить отсюда</button>
-    <button data-mv="recv" aria-pressed="false" onclick="mvTab('recv')">Принять сюда</button>
+    <button data-mv="pull" aria-pressed="false" onclick="mvTab('pull')">Забрать сюда</button>
+    <button data-mv="recv" aria-pressed="false" onclick="mvTab('recv')">Принять по ключу</button>
   </div>
   <div id="mv_body"></div>
   <div class="btns" id="mv_btns"></div>
 </div></dialog>
 
 <dialog id="ask"><form class="dlg" method="dialog" onsubmit="return false">
-  <h3 id="askTitle"></h3><div id="askText" class="muted"></div>
+  <h3 id="askTitle"></h3><div id="askText" class="muted" style="white-space:pre-line; overflow-wrap:anywhere"></div>
   <input id="askInput" style="margin-top:14px; display:none">
   <div class="btns"><button type="button" id="askNo">Отмена</button><button type="button" class="primary" id="askYes">ОК</button></div>
 </form></dialog>
@@ -476,7 +480,8 @@ function mvTab(t) {
 async function openMove() {
   mvShownKey = ''; $('move').showModal();
   const st = await api('GET', '/api/move/status').catch(() => null);
-  mvTab(st && st.job && st.job.running && st.job.kind === 'import' ? 'recv' : 'send');
+  mvTab(st && st.pull && !['done', 'error', 'cancelled'].includes(st.pull.phase) || (st && st.pull && st.pull.phase === 'done') ? 'pull'
+        : st && st.job && st.job.running && st.job.kind === 'import' ? 'recv' : 'send');
   clearInterval(mvTimer); mvTimer = setInterval(() => { if ($('move').open) renderMove(); else clearInterval(mvTimer); }, 700);
 }
 function mvProgress(j) {
@@ -493,8 +498,14 @@ async function renderMove() {
   let st; try { st = await api('GET', '/api/move/status'); } catch (e) { setHTML($('mv_body'), `<div class="bad small">${esc(e.message)}</div>`); return; }
   const j = st.job || {}, ex = st.export, ts = st.tailscale || {};
   if (mvTabNow === 'recv') return renderReceive(st, j);
+  if (mvTabNow === 'pull') return renderPull(st, j);
   if (j.running && j.kind !== 'import') {
     setHTML($('mv_body'), `<div>Профили упаковываются и отправляются. Не закрывайте лаунчер.</div>${mvProgress(j)}`);
+    return mvButtons(`<button type="button" onclick="mvCancelExport()">Отменить переезд</button><span class="spacer"></span>`);
+  }
+  if (ex && ex.phase === 'sent' && ex.pull) {
+    setHTML($('mv_body'), `<div style="margin-top:8px"><b>Профили забирает «${esc(ex.pull.to_name || 'другой компьютер')}».</b></div>
+      <div class="small" style="margin-top:8px">Архив на сервере. Когда тот компьютер скачает и проверит все файлы, этот компьютер очистится сам: профили и данные XLauncher будут удалены.</div>`);
     return mvButtons(`<button type="button" onclick="mvCancelExport()">Отменить переезд</button><span class="spacer"></span>`);
   }
   if (ex && ex.phase === 'sent') {
@@ -504,7 +515,13 @@ async function renderMove() {
       <div class="hint">Ключ — единственный способ получить профили (${PROF(ex.profiles.length)}, ${GB(ex.cipher_bytes)}). Он также записан в ${esc(ex.move_txt)}.<br>
         На новом компьютере: «Переезд» → «Принять сюда» → вставьте ключ.</div>
       <div class="small" style="margin-top:12px" id="mv_remote">Профили на этом компьютере заморожены, пока переезд не отменён или компьютер не очищен.</div>`);
-    return mvButtons(`<button type="button" onclick="mvCancelExport()">Отменить переезд</button><button type="button" onclick="mvCheckRemote()">Принят ли?</button><span class="spacer"></span>`);
+    if (!$('mv_finish')) {
+      $('mv_body').insertAdjacentHTML('beforeend', `<div class="mvdanger" id="mv_finish">ОПАСНО: «Завершить и очистить» удалит все профили и данные XLauncher на этом компьютере. Если ключ потерян или другой компьютер не примет архив — профили будут потеряны НАВСЕГДА.
+        <div class="small" style="font-weight:400; color:var(--ink); margin-top:6px">Надёжнее сначала принять профили на новом компьютере и проверить кнопкой «Принят ли?». Для очистки введите последние 4 знака ключа (перед @):</div>
+        <input id="mv_confirm4" maxlength="4" autocomplete="off" spellcheck="false" placeholder="XXXX"></div>`);
+    }
+    return mvButtons(`<button type="button" onclick="mvCancelExport()">Отменить переезд</button><button type="button" onclick="mvCheckRemote()">Принят ли?</button><span class="spacer"></span>
+      <button type="button" class="danger-fill" onclick="mvFinish()">Завершить и очистить</button>`);
   }
   if (ex) {
     setHTML($('mv_body'), `<div class="alert alarm small" style="margin-top:8px">Загрузка на сервер не закончена${j.error ? ': ' + esc(j.error) : ''}. Профили заморожены.</div>
@@ -532,6 +549,75 @@ async function renderMove() {
     <div class="hint">После отправки профили на этом компьютере будут заморожены — до отмены переезда или очистки компьютера. Программа и браузер не переносятся: новый компьютер скачает их сам.</div>`);
   mvButtons(`<span class="spacer"></span><button type="button" class="primary" ${ready ? '' : 'disabled'} onclick="mvExport()">Упаковать и отправить</button>`);
 }
+async function mvFinish() {
+  const c = ($('mv_confirm4') || {}).value || '';
+  if (c.trim().length !== 4) { toast('Введите последние 4 знака ключа'); return; }
+  navigator.clipboard.writeText(mvShownKey).catch(() => {});
+  if (!await ask('Очистить этот компьютер?', 'Все профили и данные лаунчера на этом компьютере будут удалены. Останутся только xlauncher.exe и MOVE.txt с ключом. Ключ скопирован в буфер обмена.', {ok: 'Очистить', danger: true})) return;
+  try { await api('POST', '/api/move/finish', {confirm: c}); setHTML($('mv_body'), '<div style="margin-top:10px">Лаунчер закрывается, загрузчик удаляет данные…</div>'); mvButtons(''); }
+  catch (e) { toast(e.message); }
+}
+// «Забрать сюда»
+let pullDevs = null, pullDevsAt = 0, pairShown = false;
+const PULL_STAGE = {requested: 'Запрос отправлен, ждём ответа', start: 'Закрывает профили', pack: 'Упаковывает', encrypt: 'Шифрует', upload: 'Загружает на сервер'};
+function agoText(s) { return s < 90 ? 'в сети' : s < 3600 ? `был ${Math.round(s / 60)} мин назад` : s < 86400 ? `был ${Math.round(s / 3600)} ч назад` : 'давно не в сети'; }
+async function renderPull(st, j) {
+  const pl = st.pull;
+  if (pl && pl.phase === 'done') {
+    const r = pl.result || {};
+    setHTML($('mv_body'), `<div style="margin-top:8px"><b class="ok">Готово.</b> С «${esc(pl.target_name)}» перенесено: ${PROF((r.added || []).length + (r.replaced || []).length)}.</div>
+      ${r.backup ? `<div class="hint">Прежние профили этого компьютера сохранены в ${esc(r.backup)}</div>` : ''}
+      ${(r.warnings || []).map(w => `<div class="small bad">${esc(w)}</div>`).join('')}
+      <div class="small" style="margin-top:10px">«${esc(pl.target_name)}» увидит подтверждение и очистится сам (в течение минуты, если он в сети).</div>
+      <div class="hint">Запустите любой профиль и проверьте, что вход на сайты сохранился.</div>`);
+    return mvButtons(`<button type="button" onclick="api('POST','/api/move/pull/clear').then(renderMove)">Новый переезд</button><span class="spacer"></span>`);
+  }
+  if (pl && pl.phase === 'error') {
+    setHTML($('mv_body'), `<div class="alert alarm small" style="margin-top:8px">${esc(pl.error || 'ошибка')}</div><div class="hint">На этом компьютере ничего не изменилось. Профили на «${esc(pl.target_name)}» разморожены, если он успел их заморозить.</div>`);
+    return mvButtons(`<button type="button" onclick="api('POST','/api/move/pull/clear').then(renderMove)">Понятно</button><span class="spacer"></span>`);
+  }
+  if (pl) {
+    let body;
+    if (pl.phase === 'receiving' && j.kind === 'import') body = `Профили с «${esc(pl.target_name)}» скачиваются и проверяются. Не закрывайте лаунчер.${mvProgress(j)}`;
+    else {
+      const pr = pl.progress || {}, wait = Math.round(Date.now() / 1000 - pl.updated);
+      body = `«${esc(pl.target_name)}»: ${PULL_STAGE[pl.phase] || pl.phase}…` + (pr.total ? mvProgress({...pr, stage: pr.stage}) : '')
+        + (pl.phase === 'requested' && wait > 60 ? `<div class="small bad" style="margin-top:8px">Нет ответа ${Math.round(wait / 60)} мин — тот компьютер выключен или лаунчер на нём закрыт. Запрос подождёт.</div>` : '');
+    }
+    setHTML($('mv_body'), `<div style="margin-top:10px">${body}</div><div class="hint">Профили на том компьютере закрываются и замораживаются; он очистится только после того, как здесь всё будет проверено.</div>`);
+    return mvButtons(pl.phase === 'receiving' ? '<span class="spacer"></span>' : `<button type="button" onclick="mvPullCancel()">Отменить</button><span class="spacer"></span>`);
+  }
+  if (!st.paired) {
+    if (document.activeElement && document.activeElement.id === 'mv_pair') return;
+    setHTML($('mv_body'), `<div class="small" style="margin-top:8px">Чтобы забирать профили с другого компьютера без человека рядом с ним, свяжите компьютеры одним <b>кодом связки</b>: создайте код здесь и введите его на другом компьютере (или наоборот). Делается один раз.</div>
+      <label for="mv_pair">Код связки</label><div class="inline"><input id="mv_pair" placeholder="XLP-XXXX-…@адрес:порт" spellcheck="false"><button type="button" onclick="mvPairSet()">Сохранить</button></div>
+      <div class="hint">Нет кода? <a href="#" onclick="mvPairNew(); return false">Создать новый</a> — для этого нужен адрес сервера переезда (вкладка «Отправить отсюда»).</div>`);
+    return mvButtons('<span class="spacer"></span>');
+  }
+  if (!pullDevs || Date.now() - pullDevsAt > 10000) {
+    pullDevsAt = Date.now(); api('GET', '/api/move/devices').then(d => { pullDevs = d; renderMove(); }).catch(e => { pullDevs = {error: e.message, devices: []}; });
+  }
+  const devs = (pullDevs || {}).devices || [];
+  const rows = devs.map(d => `<div><span><b>${esc(d.name)}</b> — ${PROF(d.profiles || 0)}, <span class="${d.online ? 'ok' : 'muted'}">${agoText(d.seen_ago)}</span>${d.busy ? ` · ${d.busy === 'moved' ? 'профили уже переданы' : 'занят переездом'}` : ''}</span>
+      <button type="button" class="primary" style="margin-left:auto" ${d.online && d.can_pull && !d.busy && d.profiles ? '' : 'disabled'} onclick="mvPull('${esc(d.id)}', '${esc(d.name)}', ${d.profiles || 0})">Забрать сюда</button></div>`).join('');
+  setHTML($('mv_body'), `<div class="small" style="margin-top:8px">Компьютеры связки:</div>
+    <div class="mvlist">${pullDevs ? (pullDevs.error ? `<span class="bad">${esc(pullDevs.error)}</span>` : rows || '<span class="muted">Других компьютеров пока нет — введите этот же код связки на другом компьютере.</span>') : 'Загружаю…'}</div>
+    <div class="hint">Профили того компьютера закроются и переедут сюда. Профили этого компьютера уйдут в папку backups (не удаляются). Тот компьютер очистится сам после проверки всех файлов здесь.</div>
+    <div class="hint" style="margin-top:10px"><a href="#" onclick="mvPairShow(); return false">Показать код связки</a> · <a href="#" onclick="mvPairClear(); return false">Отвязать этот компьютер</a></div>`);
+  mvButtons('<span class="spacer"></span>');
+}
+async function mvPairSet() { try { await api('POST', '/api/move/pair', {code: $('mv_pair').value}); $('mv_pair').blur(); pullDevs = null; toast('Компьютер в связке', 'ok', 3000); renderMove(); } catch (e) { toast(e.message); } }
+async function mvPairNew() {
+  try { const r = await api('POST', '/api/move/pair', {new: true}); pullDevs = null; await ask('Код связки создан', `Введите этот код на другом компьютере: «Переезд» → «Забрать сюда» → «Код связки».\n\n${r.code}`, {ok: 'Скопировать'}) && navigator.clipboard.writeText(r.code); renderMove(); }
+  catch (e) { toast(e.message); }
+}
+async function mvPairShow() { try { const r = await api('GET', '/api/move/pair'); if (await ask('Код связки', r.code + '\n\nКод даёт доступ к переезду профилей между вашими компьютерами — не пересылайте его посторонним.', {ok: 'Скопировать'})) navigator.clipboard.writeText(r.code); } catch (e) { toast(e.message); } }
+async function mvPairClear() { if (await ask('Отвязать этот компьютер?', 'Другие компьютеры перестанут его видеть, а он — их. Вернуть — ввести код связки заново.', {ok: 'Отвязать', danger: true})) { await api('POST', '/api/move/pair/clear').catch(e => toast(e.message)); pullDevs = null; renderMove(); } }
+async function mvPull(id, name, n) {
+  if (!await ask(`Забрать профили с «${name}»?`, `На «${name}» сразу закроются запущенные профили, ${PROF(n)} переедут сюда. Профили этого компьютера уйдут в папку backups. «${name}» очистится сам после проверки всех файлов здесь.`, {ok: 'Забрать сюда'})) return;
+  try { await api('POST', '/api/move/pull', {target: id}); renderMove(); } catch (e) { toast(e.message); }
+}
+async function mvPullCancel() { if (await ask('Отменить?', 'Профили на том компьютере разморозятся, архив на сервере удалится.', {ok: 'Отменить переезд', danger: true})) { await api('POST', '/api/move/pull/cancel').catch(e => toast(e.message)); renderMove(); } }
 async function mvSaveRelay() {
   try { const r = await api('POST', '/api/move/relay', {relay: $('mv_relay').value}); toast(`Сервер переезда на связи, свободно ${GB(r.free_bytes)}`, 'ok', 4000); $('mv_relay').blur(); renderMove(); }
   catch (e) { toast(e.message); }
@@ -618,7 +704,7 @@ function renderBanners() {
   b += tailscaleBanner(s.tailscale || {});
   b += firewallBanner(s.firewall);
   if (s.move && s.move.export) b += `<div class="banner caution"><div class="text">${s.move.export === 'sent'
-      ? 'Идёт переезд: профили отправлены на сервер и заморожены на этом компьютере. Ключ — в MOVE.txt.'
+      ? (s.move.pull ? 'Профили забирает другой компьютер: здесь они заморожены, после проверки там этот компьютер очистится.' : 'Идёт переезд: профили отправлены на сервер и заморожены на этом компьютере. Ключ — в MOVE.txt.')
       : 'Переезд не закончен: загрузка на сервер прервалась, профили заморожены.'}</div><div class="actions"><button class="primary" onclick="openMove()">Открыть</button></div></div>`;
   if (s.move && s.move.pending) b += `<div class="banner caution"><div class="text">Профили приняты, но сервер переезда ещё не подтвердил удаление архива — повторю при следующем запуске.</div></div>`;
   if (e.version && !e.installed) {

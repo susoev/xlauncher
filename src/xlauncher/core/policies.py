@@ -50,3 +50,20 @@ def apply() -> bool:
     if changed:
         log.info("поисковик по умолчанию для профилей: Google (рекомендованная политика)")
     return changed
+
+
+def remove() -> None:
+    """Убрать то, что ставил лаунчер (перед очисткой компьютера после переезда)."""
+    if sys.platform != "win32":
+        return
+    import winreg
+
+    try:
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, KEY, 0, winreg.KEY_READ | winreg.KEY_WRITE) as k:
+            for name in GOOGLE:
+                try:
+                    winreg.DeleteValue(k, name)
+                except FileNotFoundError:
+                    pass
+    except FileNotFoundError:
+        pass
