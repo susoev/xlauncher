@@ -96,6 +96,12 @@ def selftest() -> int:
 
     print(f"selftest tailscale: {tailscale.status()['state']}")  # только сообщаем: на CI его нет — это нормально
 
+    from .core import move  # cryptography в сборке: шифрование пакета туда и обратно
+
+    k = move.derive(b"\0" * 20)
+    assert move.decrypt_chunk(k, 1, move.encrypt_chunk(k, 1, b"xl", True), True) == b"xl"
+    print("selftest move: ok")
+
     from .core import firewall
 
     if firewall.supported():  # скрипт проверки брандмауэра должен отрабатывать без прав администратора
@@ -178,6 +184,18 @@ def main() -> int:
             firewall.check_async(int(remote.config()["port"]))  # не закрыл ли брандмауэр порт после обновления
     except Exception:  # noqa: BLE001
         log.exception("удалённый доступ не запустился")
+
+    def move_confirms() -> None:
+        """Дослать подтверждения приёма переезда, если в прошлый раз не было связи с сервером."""
+        try:
+            from .core import move
+
+            if move.pending_imports():
+                log.info("переезд: подтверждено на сервере %s", move.retry_pending_confirms())
+        except Exception:  # noqa: BLE001
+            log.exception("переезд: подтверждение")
+
+    threading.Thread(target=move_confirms, name="move-confirm", daemon=True).start()
 
     def watch_show_requests() -> None:
         f = paths.run_dir() / "show-request"

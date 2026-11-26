@@ -299,3 +299,29 @@ def test_pending_confirm_retried(relay, tmp_path, monkeypatch):
     assert move.retry_pending_confirms() == 1 and not move.pending_imports()
     assert not [d for d in (store / "packages").iterdir() if d.is_dir()]
     json.dumps(res)
+
+
+def test_api_export_key_and_frozen_status(relay, monkeypatch):
+    from fastapi.testclient import TestClient
+
+    from xlauncher.server import create_app
+
+    addr, _ = relay
+    _profile("Шесть")
+    c = TestClient(create_app(None))
+    assert c.post("/api/move/export").json()["error"] == "укажите адрес сервера переезда"
+    assert c.post("/api/move/relay", json={"relay": "нет такого"}).status_code == 400
+    assert c.post("/api/move/relay", json={"relay": addr}).json()["relay"] == addr
+    assert c.get("/api/move/estimate").json()["profiles"] == 1
+    c.post("/api/move/export")
+    for _ in range(200):
+        j = c.get("/api/move/status").json()["job"]
+        if not j["running"]:
+            break
+        time.sleep(0.05)
+    assert j["stage"] == "done" and "key" not in j["result"] and "secret" not in j["result"]
+    assert c.get("/api/status").json()["move"]["export"] == "sent"
+    key = c.get("/api/move/key").json()["key"]
+    assert key.startswith("XL1-") and c.get("/api/move/remote").json()["status"] == "waiting"
+    assert c.post("/api/move/export/cancel").json()["status"] == "cancelled"
+    assert c.get("/api/status").json()["move"]["export"] is None

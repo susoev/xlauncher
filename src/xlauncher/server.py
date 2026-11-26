@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import os
+import time
 from typing import TYPE_CHECKING
 
 from fastapi import Body, FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 
 from . import __version__, paths, settings
-from .core import firewall, iphistory, profiles, service, tailscale
+from .core import firewall, iphistory, profiles, runstate, service, tailscale
 
 if TYPE_CHECKING:
     from .updater import Updater
@@ -31,6 +32,12 @@ def create_app(updater: "Updater | None") -> FastAPI:
     async def bad_request(_: Request, e: ValueError):
         return JSONResponse({"error": str(e)}, status_code=400)
 
+    from .core import move
+
+    @app.exception_handler(move.MoveError)
+    async def move_error(_: Request, e: move.MoveError):
+        return JSONResponse({"error": str(e)}, status_code=400)
+
     # ---------------------------------------------------------- служебное
 
     @app.get("/api/health")
@@ -50,6 +57,7 @@ def create_app(updater: "Updater | None") -> FastAPI:
             "host": __import__("platform").node(),
             "tailscale": tailscale.current(),
             "firewall": _firewall_status(),
+            "move": {"export": (move.load_state() or {}).get("phase"), "pending": len(move.pending_imports())},
         }
 
     @app.get("/api/tailscale")
@@ -186,6 +194,80 @@ def create_app(updater: "Updater | None") -> FastAPI:
         if fw.get("port") != cfg["port"]:
             fw = {"supported": True, "ok": None, "checking": True}
         return fw
+
+    # ---------------------------------------------------------- переезд
+    # Только локальный API (127.0.0.1): удалённый MCP сюда не ходит, MCP-инструментов переезда нет —
+    # ключ даёт доступ ко всем аккаунтам, а очистка удаляет данные.
+
+    @app.get("/api/move/status")
+    def move_status() -> dict:
+        return {"job": move.job.snapshot(), "export": move.export_summary(), "relay": move.relay_setting(),
+                "pending_confirms": len(move.pending_imports()), "tailscale": tailscale.current()}
+
+    @app.get("/api/move/estimate")
+    def move_estimate() -> dict:
+        items, _ = profiles.load_all()
+        running = [p.data.get("name") or p.id for p in items if runstate.is_active(p.id)]
+        return {**move.estimate(), "running": running}
+
+    @app.post("/api/move/relay")
+    def move_relay(body: dict = Body(...)) -> dict:
+        return move.set_relay(str(body.get("relay") or ""))
+
+    @app.post("/api/move/stop-all")
+    def move_stop_all() -> dict:
+        items, _ = profiles.load_all()
+        stopped = [p.id for p in items if runstate.is_active(p.id) and service.stop(p.id)["was_running"]]
+        for _ in range(150):  # до 30 с: раннеры закрывают браузер и сохраняют профиль
+            if not any(runstate.is_active(pid) for pid in stopped):
+                break
+            time.sleep(0.2)
+        return {"ok": True, "stopped": len(stopped),
+                "still_running": [pid for pid in stopped if runstate.is_active(pid)]}
+
+    @app.post("/api/move/export")
+    def move_export() -> dict:
+        relay = move.relay_setting()
+        if not relay:
+            raise move.MoveError("укажите адрес сервера переезда")
+        return move.job.start("export", move.export, relay)
+
+    @app.post("/api/move/export/resume")
+    def move_export_resume() -> dict:
+        return move.job.start("upload", move.upload)
+
+    @app.post("/api/move/export/cancel")
+    def move_export_cancel() -> dict:
+        move.job.cancel()
+        return move.cancel_export()
+
+    @app.get("/api/move/key")
+    def move_key() -> dict:
+        st = move.load_state()
+        if not st or st.get("phase") != "sent":
+            raise move.MoveError("нет отправленного переезда")
+        return {"key": st["key"], "key_id": move.key_id(st["key"])}
+
+    @app.get("/api/move/remote")
+    def move_remote() -> dict:
+        return {"status": move.remote_status()}
+
+    @app.post("/api/move/import/inspect")
+    def move_inspect(body: dict = Body(...)) -> dict:
+        return move.inspect(str(body.get("key") or ""))
+
+    @app.post("/api/move/import")
+    def move_import(body: dict = Body(...)) -> dict:
+        key = str(body.get("key") or "")
+        move.parse_key(key)
+        conflicts = {str(k): str(v) for k, v in (body.get("conflicts") or {}).items()}
+        return move.job.start("import", move.receive, key, conflicts=conflicts)
+
+    @app.post("/api/move/import/cancel")
+    def move_import_cancel(body: dict = Body(...)) -> dict:
+        move.job.cancel()
+        move.cancel_import(str(body.get("key") or ""))
+        return {"ok": True}
 
     @app.get("/api/remote")
     def remote_status() -> dict:

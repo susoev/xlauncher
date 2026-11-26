@@ -950,3 +950,102 @@ def cancel_import(key: str) -> None:
     """Бросить начатый приём: удалить скачанное (пакет на сервере остаётся)."""
     secret, _ = parse_key(key)
     shutil.rmtree(_in_dir(derive(secret).package_id), ignore_errors=True)
+
+
+# ---------------------------------------------------------------- фоновая задача для интерфейса
+
+
+class Job:
+    """Одна фоновая операция переезда (отправка, докачка, приём) с прогрессом для GET /api/move/status."""
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._cancel = threading.Event()
+        self._thread: threading.Thread | None = None
+        self.state: dict = {"kind": None, "running": False}
+
+    @property
+    def running(self) -> bool:
+        return bool(self._thread and self._thread.is_alive())
+
+    def snapshot(self) -> dict:
+        with self._lock:
+            return dict(self.state)
+
+    def _progress(self, stage: str, done: int, total: int, **kw) -> None:
+        with self._lock:
+            self.state.update(stage=stage, done=done, total=total, **kw)
+
+    def start(self, kind: str, fn: Callable[..., dict], *args, **kwargs) -> dict:
+        with self._lock:
+            if self.running:
+                raise MoveError("переезд уже выполняется")
+            self._cancel = threading.Event()
+            self.state = {"kind": kind, "running": True, "stage": "start", "done": 0, "total": 0,
+                          "error": None, "result": None, "started": time.time()}
+
+        def run() -> None:
+            try:
+                res = fn(*args, progress=self._progress, cancel=self._cancel, **kwargs)
+                upd = {"result": _public_result(res), "stage": "done"}
+            except Cancelled:
+                upd = {"stage": "cancelled"}
+            except MoveError as e:
+                upd = {"error": str(e), "stage": "error"}
+            except Exception as e:  # noqa: BLE001
+                log.exception("переезд")
+                upd = {"error": f"{type(e).__name__}: {e}", "stage": "error"}
+            with self._lock:
+                self.state.update(upd, running=False, finished=time.time())
+
+        self._thread = threading.Thread(target=run, name=f"move-{kind}", daemon=True)
+        self._thread.start()
+        return self.snapshot()
+
+    def cancel(self, wait: float = 30) -> None:
+        self._cancel.set()
+        if self._thread:
+            self._thread.join(wait)
+
+
+def _public_result(res: dict) -> dict:
+    """Без секрета: ключ отдаётся отдельно и только локально."""
+    return {k: v for k, v in (res or {}).items() if k not in ("secret", "chunk_sha256", "key", "delete_token")}
+
+
+job = Job()
+
+
+def export_summary() -> dict | None:
+    """Незавершённый переезд с этой машины (без секрета)."""
+    st = load_state()
+    if not st:
+        return None
+    return {"phase": st["phase"], "created": st["created"], "sent": st.get("sent"), "relay": st["relay"],
+            "profiles": st["profiles"], "cipher_bytes": st["cipher_bytes"], "key_id": key_id(st["key"]),
+            "move_txt": str(move_txt())}
+
+
+def relay_setting() -> str:
+    return str((settings.load().get("move") or {}).get("relay") or "")
+
+
+def set_relay(relay: str) -> dict:
+    relay = normalize_relay(relay)
+    cl = Relay(relay, timeout=10)
+    try:
+        h = cl.health()
+    finally:
+        cl.close()
+    cur = settings.load().get("move") or {}
+    settings.save({"move": {**cur, "relay": relay}})
+    return {"relay": relay, "free_bytes": h.get("free_bytes")}
+
+
+def check_relay(relay: str) -> dict:
+    cl = Relay(relay, timeout=10)
+    try:
+        h = cl.health()
+    finally:
+        cl.close()
+    return {"ok": True, "free_bytes": h.get("free_bytes")}

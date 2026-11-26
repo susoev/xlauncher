@@ -130,6 +130,13 @@ dialog::backdrop { background:rgba(15,18,28,.4); }
 .inline input { flex:1; }
 #checkResult { font-size:13px; margin-top:7px; }
 .ok { color:var(--run); } .bad { color:var(--alarm); }
+.mvtabs { padding:0; border:0; margin:6px 0 4px; }
+.mvchecks { list-style:none; padding:0; margin:10px 0 0; } .mvchecks li { padding:4px 0; display:flex; gap:8px; align-items:baseline; flex-wrap:wrap; }
+.mvchecks li b { width:16px; display:inline-block; }
+.mvkey { font-size:15px; letter-spacing:.3px; }
+.mvlist { max-height:180px; overflow:auto; border:1px solid var(--line); border-radius:var(--radius-s); padding:6px 10px; margin-top:6px; font-size:13px; }
+.mvlist div { padding:2px 0; display:flex; gap:8px; align-items:center; } .mvlist select { margin-left:auto; }
+textarea#mv_key { min-height:64px; font:13px Consolas, "Cascadia Mono", monospace; }
 #toasts { position:fixed; right:16px; bottom:16px; display:flex; flex-direction:column; gap:8px; z-index:20; max-width:420px; }
 .toast { background:var(--panel); border:1px solid var(--line); border-left:4px solid var(--brand); border-radius:var(--radius-s);
          padding:10px 13px; box-shadow:0 8px 24px rgba(20,25,40,.18); font-size:13px; cursor:pointer; }
@@ -147,6 +154,7 @@ dialog::backdrop { background:rgba(15,18,28,.4); }
     <input id="q" type="search" placeholder="Найти профиль, клиента, IP" aria-label="Поиск профилей"></div>
   <span class="spacer"></span>
   <span id="updState"></span>
+  <button class="ghost" onclick="openMove()" title="Перенести профили на другой компьютер">Переезд</button>
   <button class="ghost" onclick="checkUpdates()" title="Проверить обновления">Обновления</button>
   <button class="ghost" onclick="startAudit()" title="Проверить, не совпадают ли отпечатки профилей">Отпечатки</button>
   <button class="ghost" onclick="openSettings()">Настройки</button>
@@ -193,6 +201,16 @@ dialog::backdrop { background:rgba(15,18,28,.4); }
   <section style="margin-top:20px"><dl class="kv small" id="s_info"></dl></section>
   <div class="btns"><button type="button" onclick="api('POST','/api/open-root').catch(e => toast(e.message))">Открыть папку лаунчера</button><span class="spacer"></span>
     <button type="button" onclick="$('settings').close()">Закрыть</button><button type="button" class="primary" onclick="saveSettings()">Сохранить</button></div>
+</div></dialog>
+
+<dialog id="move" style="width:min(640px, 94vw)"><div class="dlg">
+  <h3>Переезд на другой компьютер</h3>
+  <div class="filters mvtabs" role="group" aria-label="Режим">
+    <button data-mv="send" aria-pressed="true" onclick="mvTab('send')">Отправить отсюда</button>
+    <button data-mv="recv" aria-pressed="false" onclick="mvTab('recv')">Принять сюда</button>
+  </div>
+  <div id="mv_body"></div>
+  <div class="btns" id="mv_btns"></div>
 </div></dialog>
 
 <dialog id="ask"><form class="dlg" method="dialog" onsubmit="return false">
@@ -273,7 +291,7 @@ function renderList() {
   $('c_run').textContent = profiles.filter(p => view(p).active).length || '';
   $('c_alarm').textContent = profiles.filter(p => view(p).alarm).length || '';
   const shown = profiles.filter(matches);
-  if (!profiles.length) { setHTML($('rows'), '<div class="empty">Профилей пока нет.<br><br><button class="primary" onclick="openForm()">Создать первый профиль</button></div>'); return; }
+  if (!profiles.length) { setHTML($('rows'), '<div class="empty">Профилей пока нет.<br><br><button class="primary" onclick="openForm()">Создать первый профиль</button><br><br><button onclick="openMove().then(() => mvTab(\'recv\'))">Принять с другого компьютера</button></div>'); return; }
   if (!shown.length) { setHTML($('rows'), '<div class="empty">Ничего не найдено. Измени запрос или фильтр.</div>'); return; }
   const groups = {};
   for (const p of shown) (groups[p.group || 'Без клиента'] ||= []).push(p);
@@ -445,6 +463,147 @@ async function fixFirewall() {
 async function checkFirewall() {
   try { const r = await api('POST', '/api/remote/firewall/check'); status.firewall = r.firewall; renderBanners(); refreshRemote(); } catch (e) { toast(e.message); }
 }
+// ---------- переезд
+let mvTabNow = 'send', mvTimer = null, mvInfo = null, mvKeyText = '', mvShownKey = '';
+const plural = (n, a, b, c) => { const m = n % 100, k = n % 10; return `${n} ${m > 10 && m < 20 ? c : k === 1 ? a : k > 1 && k < 5 ? b : c}`; };
+const PROF = n => plural(n, 'профиль', 'профиля', 'профилей');
+const GB = n => n >= 1e9 ? (n / 1e9).toFixed(2).replace('.', ',') + ' ГБ' : Math.max(1, Math.round(n / 1e6)) + ' МБ';
+const MV_STAGE = {start: 'Подготовка…', pack: 'Упаковка', encrypt: 'Шифрование', upload: 'Загрузка на сервер', download: 'Скачивание', verify: 'Проверка файлов'};
+function mvTab(t) {
+  mvTabNow = t; document.querySelectorAll('[data-mv]').forEach(b => b.setAttribute('aria-pressed', b.dataset.mv === t));
+  renderMove();
+}
+async function openMove() {
+  mvShownKey = ''; $('move').showModal();
+  const st = await api('GET', '/api/move/status').catch(() => null);
+  mvTab(st && st.job && st.job.running && st.job.kind === 'import' ? 'recv' : 'send');
+  clearInterval(mvTimer); mvTimer = setInterval(() => { if ($('move').open) renderMove(); else clearInterval(mvTimer); }, 700);
+}
+function mvProgress(j) {
+  const pct = j.total ? Math.floor(100 * j.done / j.total) : 0;
+  let line = `${MV_STAGE[j.stage] || j.stage}${j.total ? `: ${j.done} из ${j.total}` : ''}`;
+  if (j.total_bytes && j.seconds > 1 && j.bytes) {
+    const speed = j.bytes / j.seconds, left = Math.max(0, j.total_bytes * (1 - j.done / j.total)) / speed;
+    line = `${MV_STAGE[j.stage]}: ${GB(j.total_bytes * j.done / j.total)} из ${GB(j.total_bytes)} · ${(speed / 1e6).toFixed(1).replace('.', ',')} МБ/с · осталось ~${left < 90 ? Math.ceil(left) + ' с' : Math.ceil(left / 60) + ' мин'}`;
+  }
+  return `<div class="small" style="margin-top:14px">${esc(line)}</div><div class="progress"><i style="width:${pct}%"></i></div>`;
+}
+function mvButtons(html) { setHTML($('mv_btns'), html + `<button type="button" onclick="$('move').close()">Закрыть</button>`); }
+async function renderMove() {
+  let st; try { st = await api('GET', '/api/move/status'); } catch (e) { setHTML($('mv_body'), `<div class="bad small">${esc(e.message)}</div>`); return; }
+  const j = st.job || {}, ex = st.export, ts = st.tailscale || {};
+  if (mvTabNow === 'recv') return renderReceive(st, j);
+  if (j.running && j.kind !== 'import') {
+    setHTML($('mv_body'), `<div>Профили упаковываются и отправляются. Не закрывайте лаунчер.</div>${mvProgress(j)}`);
+    return mvButtons(`<button type="button" onclick="mvCancelExport()">Отменить переезд</button><span class="spacer"></span>`);
+  }
+  if (ex && ex.phase === 'sent') {
+    if (!mvShownKey) { try { mvShownKey = (await api('GET', '/api/move/key')).key; } catch (e) { mvShownKey = ''; } }
+    setHTML($('mv_body'), `<div style="margin-top:8px"><b>Данные на сервере. Сохраните ключ.</b></div>
+      <div class="copyrow"><div class="code mvkey" id="mv_keybox">${esc(mvShownKey)}</div><button type="button" id="mv_copy" onclick="mvCopyKey()">Скопировать</button></div>
+      <div class="hint">Ключ — единственный способ получить профили (${PROF(ex.profiles.length)}, ${GB(ex.cipher_bytes)}). Он также записан в ${esc(ex.move_txt)}.<br>
+        На новом компьютере: «Переезд» → «Принять сюда» → вставьте ключ.</div>
+      <div class="small" style="margin-top:12px" id="mv_remote">Профили на этом компьютере заморожены, пока переезд не отменён или компьютер не очищен.</div>`);
+    return mvButtons(`<button type="button" onclick="mvCancelExport()">Отменить переезд</button><button type="button" onclick="mvCheckRemote()">Принят ли?</button><span class="spacer"></span>`);
+  }
+  if (ex) {
+    setHTML($('mv_body'), `<div class="alert alarm small" style="margin-top:8px">Загрузка на сервер не закончена${j.error ? ': ' + esc(j.error) : ''}. Профили заморожены.</div>
+      <div class="hint">«Продолжить» дошлёт только недостающие части.</div>`);
+    return mvButtons(`<button type="button" onclick="mvCancelExport()">Отменить переезд</button><span class="spacer"></span><button type="button" class="primary" onclick="mvResume()">Продолжить</button>`);
+  }
+  if (!renderMove._est || Date.now() - renderMove._estAt > 5000) {
+    renderMove._estAt = Date.now(); api('GET', '/api/move/estimate').then(e => { renderMove._est = e; }).catch(() => {});
+  }
+  const est = renderMove._est || {};
+  const run = est.running || [];
+  const tsOk = ts.state === 'running', relayOk = !!st.relay;
+  const ready = tsOk && relayOk && !run.length && est.profiles > 0;
+  const row = (ok, text, extra = '') => `<li><b class="${ok ? 'ok' : 'bad'}">${ok ? '✓' : '✗'}</b><span>${text}</span>${extra}</li>`;
+  const relayInput = document.activeElement && document.activeElement.id === 'mv_relay' ? document.activeElement.value : (st.relay || '');
+  if (document.activeElement && document.activeElement.id === 'mv_relay') return;  // не мешаем вводу адреса
+  setHTML($('mv_body'), `<ul class="mvchecks">
+      ${row(tsOk, tsOk ? `Tailscale в сети${ts.host ? ' (' + esc(ts.host) + ')' : ''}` : 'Tailscale не в сети — без него сервер переезда недоступен')}
+      ${row(relayOk, 'Сервер переезда', `<span class="inline" style="flex:1; min-width:240px"><input id="mv_relay" value="${esc(relayInput)}" placeholder="100.x.x.x:47120" spellcheck="false"><button type="button" onclick="mvSaveRelay()">Проверить</button></span>`)}
+      ${row(!run.length, run.length ? `Запущены профили: ${esc(run.slice(0, 3).join(', '))}${run.length > 3 ? '…' : ''}` : 'Все профили остановлены',
+            run.length ? `<button type="button" onclick="mvStopAll(this)">Остановить все</button>` : '')}
+    </ul>
+    ${j.error && j.kind !== 'import' ? `<div class="alert alarm small">${esc(j.error)}</div>` : ''}
+    <div style="margin-top:12px">${est.profiles != null ? `${PROF(est.profiles)}, примерно ${GB(est.bytes || 0)} без кеша` : 'Считаю размер…'}</div>
+    <div class="hint">После отправки профили на этом компьютере будут заморожены — до отмены переезда или очистки компьютера. Программа и браузер не переносятся: новый компьютер скачает их сам.</div>`);
+  mvButtons(`<span class="spacer"></span><button type="button" class="primary" ${ready ? '' : 'disabled'} onclick="mvExport()">Упаковать и отправить</button>`);
+}
+async function mvSaveRelay() {
+  try { const r = await api('POST', '/api/move/relay', {relay: $('mv_relay').value}); toast(`Сервер переезда на связи, свободно ${GB(r.free_bytes)}`, 'ok', 4000); $('mv_relay').blur(); renderMove(); }
+  catch (e) { toast(e.message); }
+}
+async function mvStopAll(btn) {
+  btn.disabled = true; btn.textContent = 'Останавливаю…';
+  try { const r = await api('POST', '/api/move/stop-all'); if (r.still_running.length) toast('Часть профилей ещё закрывается — подождите'); }
+  catch (e) { toast(e.message); }
+  renderMove._est = null; renderMove();
+}
+async function mvExport() {
+  if (!await ask('Отправить профили?', 'Профили упакуются, зашифруются и уйдут на сервер переезда. На этом компьютере они будут заморожены до отмены переезда или очистки.', {ok: 'Отправить'})) return;
+  try { await api('POST', '/api/move/export'); renderMove(); } catch (e) { toast(e.message); }
+}
+async function mvResume() { try { await api('POST', '/api/move/export/resume'); renderMove(); } catch (e) { toast(e.message); } }
+async function mvCancelExport() {
+  if (!await ask('Отменить переезд?', 'Архив на сервере будет удалён, профили на этом компьютере снова можно запускать. Ключ перестанет работать.', {ok: 'Отменить переезд', danger: true})) return;
+  try { await api('POST', '/api/move/export/cancel'); mvShownKey = ''; toast('Переезд отменён, профили разморожены', 'ok', 4000); load(); renderMove(); } catch (e) { toast(e.message); }
+}
+function mvCopyKey() {
+  navigator.clipboard.writeText(mvShownKey).then(() => { $('mv_copy').textContent = 'Скопировано'; setTimeout(() => { if ($('mv_copy')) $('mv_copy').textContent = 'Скопировать'; }, 2500); },
+    () => toast('Не удалось скопировать — выделите ключ и нажмите Ctrl+C'));
+}
+async function mvCheckRemote() {
+  try {
+    const r = await api('GET', '/api/move/remote');
+    const t = {waiting: 'Ещё не принят: архив ждёт на сервере.', confirmed: 'Принят на другом компьютере и проверен — архив на сервере удалён.',
+               cancelled: 'Переезд отменён.', removed: 'Архив удалён с сервера вручную.'}[r.status] || 'Сервер переезда не отвечает.';
+    toast(t, r.status === 'confirmed' ? 'ok' : 'err', 8000);
+  } catch (e) { toast(e.message); }
+}
+function renderReceive(st, j) {
+  if (j.running && j.kind === 'import') {
+    setHTML($('mv_body'), `<div>Профили скачиваются и проверяются. Не закрывайте лаунчер.</div>${mvProgress(j)}`);
+    return mvButtons(`<button type="button" onclick="mvCancelImport()">Прервать</button><span class="spacer"></span>`);
+  }
+  if (j.kind === 'import' && j.stage === 'done' && j.result) {
+    const r = j.result;
+    setHTML($('mv_body'), `<div style="margin-top:8px"><b class="ok">Готово.</b> Перенесено: ${PROF(r.added.length + r.replaced.length)}${r.skipped.length ? `, пропущено: ${r.skipped.length}` : ''}.</div>
+      ${r.backup ? `<div class="hint">Заменённые профили сохранены в ${esc(r.backup)}</div>` : ''}
+      ${(r.warnings || []).map(w => `<div class="small bad">${esc(w)}</div>`).join('')}
+      <div class="small" style="margin-top:10px">${r.confirmed ? 'Архив на сервере удалён.' : 'Сервер переезда пока не подтвердил удаление архива — лаунчер повторит сам.'}</div>
+      <div class="hint">Запустите любой профиль и проверьте, что вход на сайты сохранился. Файл MOVE.txt с ключом на старом компьютере больше не нужен.</div>`);
+    return mvButtons(`<span class="spacer"></span>`);
+  }
+  const keyVal = $('mv_key') ? $('mv_key').value : mvKeyText;
+  if (document.activeElement && document.activeElement.id === 'mv_key') return;
+  const info = mvInfo;
+  let html = `<label for="mv_key">Ключ переезда</label><textarea id="mv_key" spellcheck="false" placeholder="XL1-XXXX-XXXX-…@адрес:порт" oninput="mvKeyText=this.value; mvInfo=null">${esc(keyVal)}</textarea>`;
+  if (st.export) html += `<div class="alert alarm small">С этого компьютера идёт свой переезд — сначала отмените его.</div>`;
+  if (j.kind === 'import' && j.error) html += `<div class="alert alarm small">${esc(j.error)}</div><div class="hint">Архив остался на сервере, на этом компьютере ничего не изменилось. Можно повторить.</div>`;
+  if (info) {
+    const conf = Object.fromEntries((info.conflicts || []).map(c => [c.id, c]));
+    html += `<div style="margin-top:12px">С компьютера <b>${esc(info.source_host)}</b>, ${esc(new Date(info.created).toLocaleString('ru-RU', {dateStyle: 'short', timeStyle: 'short'}))} — ${PROF(info.profiles.length)}, ${GB(info.bytes)}</div>
+      <div class="mvlist">${info.profiles.map(p => `<div><span>${esc(p.name)}</span>${conf[p.id] ? `<span class="small bad">уже есть здесь</span>
+        <select data-conf="${esc(p.id)}"><option value="skip">Пропустить</option><option value="replace">Заменить (старый — в backups)</option></select>` : ''}</div>`).join('')}</div>`;
+  }
+  setHTML($('mv_body'), html);
+  mvButtons(`<span class="spacer"></span>` + (info
+    ? `<button type="button" class="primary" ${st.export ? 'disabled' : ''} onclick="mvImport()">Принять</button>`
+    : `<button type="button" class="primary" onclick="mvInspect(this)">Проверить ключ</button>`));
+}
+async function mvInspect(btn) {
+  mvKeyText = $('mv_key').value; btn.disabled = true; btn.textContent = 'Проверяю…';
+  try { mvInfo = await api('POST', '/api/move/import/inspect', {key: mvKeyText}); } catch (e) { toast(e.message); }
+  btn.disabled = false; btn.textContent = 'Проверить ключ'; $('mv_body')._html = null; renderMove();
+}
+async function mvImport() {
+  const conflicts = {}; document.querySelectorAll('[data-conf]').forEach(s => { conflicts[s.dataset.conf] = s.value; });
+  try { await api('POST', '/api/move/import', {key: mvKeyText, conflicts}); mvInfo = null; renderMove(); } catch (e) { toast(e.message); }
+}
+async function mvCancelImport() { try { await api('POST', '/api/move/import/cancel', {key: mvKeyText}); renderMove(); } catch (e) { toast(e.message); } }
 async function tsAction(what) {
   try {
     const r = await api('POST', `/api/tailscale/${what}`);
@@ -458,6 +617,10 @@ function renderBanners() {
   if (s._connError) b += `<div class="banner alarm"><div class="text">Нет связи с лаунчером: ${esc(s._connError)}. Данные на экране могут быть устаревшими.</div></div>`;
   b += tailscaleBanner(s.tailscale || {});
   b += firewallBanner(s.firewall);
+  if (s.move && s.move.export) b += `<div class="banner caution"><div class="text">${s.move.export === 'sent'
+      ? 'Идёт переезд: профили отправлены на сервер и заморожены на этом компьютере. Ключ — в MOVE.txt.'
+      : 'Переезд не закончен: загрузка на сервер прервалась, профили заморожены.'}</div><div class="actions"><button class="primary" onclick="openMove()">Открыть</button></div></div>`;
+  if (s.move && s.move.pending) b += `<div class="banner caution"><div class="text">Профили приняты, но сервер переезда ещё не подтвердил удаление архива — повторю при следующем запуске.</div></div>`;
   if (e.version && !e.installed) {
     const ins = e.installer || {};
     if (ins.status === 'downloading') {
