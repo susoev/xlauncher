@@ -111,6 +111,10 @@ def start(pid: str, confirm_country: bool = False, agent: bool = False) -> dict:
     p = profiles.get(pid)  # проверяет существование и дубли
     if runstate.is_active(pid):
         return {"ok": False, "error": "профиль уже запущен"}
+    from . import move
+
+    if frozen := move.frozen_message():
+        return {"ok": False, "error": frozen}
     version = settings.load()["engine_version"]
     if not engine.find_exe(version):
         engine.installer.start(version)

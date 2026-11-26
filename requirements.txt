@@ -9,3 +9,4 @@ colorama            # для click/uvicorn на Windows
 websockets>=15     # мини-клиент CDP для пробы отпечатка
 mcp>=2,<3          # MCP-сервер для агентов
 pywin32>=311       # нужен mcp на Windows
+cryptography>=44    # шифрование пакетов переезда (AES-GCM, HKDF)
