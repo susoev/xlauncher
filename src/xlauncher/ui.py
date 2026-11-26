@@ -109,7 +109,7 @@ dl.kv dt { color:var(--ink2); } dl.kv dd { margin:0; min-width:0; overflow-wrap:
 .timeline .flag { color:var(--caution); font-weight:600; }
 .timeline.log li { grid-template-columns:150px 1fr; }
 .timeline.log .details { display:block; margin-top:1px; }
-.tools { display:flex; gap:8px; flex-wrap:wrap; margin-top:28px; padding-top:18px; border-top:1px solid var(--line); }
+.tools { display:flex; gap:8px; flex-wrap:wrap; margin-top:18px; padding-bottom:18px; border-bottom:1px solid var(--line); }
 .notes { white-space:pre-wrap; color:var(--ink); }
 
 /* диалоги и уведомления */
@@ -365,6 +365,18 @@ function renderDetail() {
       <div class="group-name">${esc(p.group || 'Без клиента')}${p.last_host_other ? ` <span class="small" style="color:var(--caution)">последний запуск на компьютере ${esc(p.last_host_other)}</span>` : ''}</div>
       <div class="status ${v.cls}"><i></i>${esc(statusLine)}</div></div>${big}</div>
     ${alert}
+    <div class="tools">
+      <button onclick="openForm('${p.id}')" ${v.active ? 'disabled title="Сначала останови профиль"' : ''}>Изменить</button>
+      <button onclick="cloneP('${p.id}')" ${p.duplicate ? 'disabled' : ''}>Клонировать</button>
+      <button onclick="startWarmup('${p.id}')" ${p.duplicate || !p.proxy_masked || ((st.warmup || {}).status === 'running' && st.status === 'running') ? 'disabled' : ''}>Прогреть</button>
+      <button onclick="startDayRoutine('${p.id}')" title="3–4 сайта через поиск Яндекса, листание, профиль закроется сам" ${p.duplicate || !p.proxy_masked || ((st.warmup || {}).status === 'running' && st.status === 'running') ? 'disabled' : ''}>Дневной обход</button>
+      <button onclick="api('POST','/api/profiles/${p.id}/open-folder').catch(e => toast(e.message))">Открыть папку</button>
+      <span class="spacer"></span>
+      <button class="danger" onclick="delP('${p.id}')" ${v.active ? 'disabled title="Сначала останови профиль"' : ''}>Удалить</button>
+    </div>
+    ${warmupSection(p)}
+    ${p.notes ? `<section><h2>Заметки</h2><div class="notes">${esc(p.notes)}</div></section>` : ''}
+    ${(p.start_urls || []).length ? `<section><h2>Открывать при запуске</h2><div class="small">${p.start_urls.map(esc).join('<br>')}</div></section>` : ''}
     <section><h2>Сеть</h2><dl class="kv">
       <dt>Прокси</dt><dd class="num">${p.proxy_masked ? esc(p.proxy_masked) : '<span class="bad">не задан, профиль не запустится</span>'}</dd>
       <dt>Внешний IP</dt><dd class="num">${ip ? esc(ip) : '<span class="faint">появится после запуска</span>'}</dd>
@@ -387,18 +399,7 @@ function renderDetail() {
       ${log.length ? `<ul class="timeline log">${log.slice(0, 15).map(r => `<li><span class="num muted">${esc(r.time)}</span><span>${esc(r.event)}
         ${r.details.filter(Boolean).length ? `<span class="details small muted num">${esc(r.details.filter(Boolean).join('   '))}</span>` : ''}</span></li>`).join('')}</ul>`
         : '<div class="faint">Профиль ещё не запускался</div>'}</section>
-    ${warmupSection(p)}
-    ${p.notes ? `<section><h2>Заметки</h2><div class="notes">${esc(p.notes)}</div></section>` : ''}
-    ${(p.start_urls || []).length ? `<section><h2>Открывать при запуске</h2><div class="small">${p.start_urls.map(esc).join('<br>')}</div></section>` : ''}
-    <div class="tools">
-      <button onclick="openForm('${p.id}')" ${v.active ? 'disabled title="Сначала останови профиль"' : ''}>Изменить</button>
-      <button onclick="cloneP('${p.id}')" ${p.duplicate ? 'disabled' : ''}>Клонировать</button>
-      <button onclick="startWarmup('${p.id}')" ${p.duplicate || !p.proxy_masked || ((st.warmup || {}).status === 'running' && st.status === 'running') ? 'disabled' : ''}>Прогреть</button>
-      <button onclick="startDayRoutine('${p.id}')" title="3–4 сайта через поиск Яндекса, листание, профиль закроется сам" ${p.duplicate || !p.proxy_masked || ((st.warmup || {}).status === 'running' && st.status === 'running') ? 'disabled' : ''}>Дневной обход</button>
-      <button onclick="api('POST','/api/profiles/${p.id}/open-folder').catch(e => toast(e.message))">Открыть папку</button>
-      <span class="spacer"></span>
-      <button class="danger" onclick="delP('${p.id}')" ${v.active ? 'disabled title="Сначала останови профиль"' : ''}>Удалить</button>
-    </div></div>`);
+    </div>`);
 }
 function warmupSection(p) {
   const st = p.state || {}, w = st.warmup;
