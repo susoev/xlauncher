@@ -96,6 +96,13 @@ def selftest() -> int:
 
     print(f"selftest tailscale: {tailscale.status()['state']}")  # только сообщаем: на CI его нет — это нормально
 
+    from .core import firewall
+
+    if firewall.supported():  # скрипт проверки брандмауэра должен отрабатывать без прав администратора
+        fw = firewall.check(47111)
+        print(f"selftest firewall: {fw}")
+        assert fw.get("ok") is not None, fw
+
     fp = fingerprint.generate("RU")
     args = engine.build_args(data_dir=paths.root(), cache_dir=paths.root(), fingerprint=fp, proxy_port=1,
                              timezone="Europe/Moscow")
@@ -165,6 +172,10 @@ def main() -> int:
         from .core import remote
 
         remote.server.apply()  # MCP по HTTP для агентов с других машин, если включён в настройках
+        if remote.config()["enabled"]:
+            from .core import firewall
+
+            firewall.check_async(int(remote.config()["port"]))  # не закрыл ли брандмауэр порт после обновления
     except Exception:  # noqa: BLE001
         log.exception("удалённый доступ не запустился")
 

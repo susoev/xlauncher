@@ -9,7 +9,7 @@ from fastapi import Body, FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 
 from . import __version__, paths, settings
-from .core import iphistory, profiles, service, tailscale
+from .core import firewall, iphistory, profiles, service, tailscale
 
 if TYPE_CHECKING:
     from .updater import Updater
@@ -49,6 +49,7 @@ def create_app(updater: "Updater | None") -> FastAPI:
             "bootstrap_version": updater.bootstrap_version() if updater else None,
             "host": __import__("platform").node(),
             "tailscale": tailscale.current(),
+            "firewall": _firewall_status(),
         }
 
     @app.get("/api/tailscale")
@@ -174,11 +175,35 @@ def create_app(updater: "Updater | None") -> FastAPI:
         settings.save(body)
         return settings.load()
 
+    def _firewall_status() -> dict | None:
+        """Брандмауэр — только когда удалённый доступ включён (иначе он не важен)."""
+        from .core import remote
+
+        cfg = remote.config()
+        if not cfg["enabled"] or not firewall.supported():
+            return None
+        fw = firewall.current()
+        if fw.get("port") != cfg["port"]:
+            fw = {"supported": True, "ok": None, "checking": True}
+        return fw
+
     @app.get("/api/remote")
     def remote_status() -> dict:
         from .core import remote
 
-        return {**remote.server.status(), "autostart": service.autostart_get()}
+        return {**remote.server.status(), "autostart": service.autostart_get(), "firewall": _firewall_status()}
+
+    @app.post("/api/remote/firewall/{what}")
+    def remote_firewall(what: str) -> dict:
+        """check — проверить заново; fix — правило по порту и снятие запретов (запрос UAC)."""
+        from .core import remote
+
+        port = int(remote.config()["port"])
+        if what == "check":
+            return {"ok": True, "firewall": firewall.check(port)}
+        if what == "fix":
+            return firewall.fix(port)
+        raise ValueError("неизвестное действие")
 
     @app.post("/api/remote")
     def remote_update(body: dict = Body(...)) -> dict:
@@ -199,9 +224,11 @@ def create_app(updater: "Updater | None") -> FastAPI:
         if vals:
             remote.save(vals)
             remote.server.apply()
+            if remote.config()["enabled"]:
+                firewall.check(int(remote.config()["port"]))
         if "autostart" in body:
             service.autostart_set(bool(body["autostart"]))
-        return {**remote.server.status(), "autostart": service.autostart_get()}
+        return {**remote.server.status(), "autostart": service.autostart_get(), "firewall": _firewall_status()}
 
     @app.post("/api/proxy/check")
     def check_proxy(body: dict = Body(...)) -> dict:

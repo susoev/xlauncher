@@ -417,6 +417,34 @@ function tailscaleBanner(t) {
   const btns = v[2].map(([a, label, primary]) => `<button ${primary ? 'class="primary"' : ''} onclick="tsAction('${a}')">${label}</button>`).join('');
   return `<div class="banner ${v[0]}"><div class="text">${v[1]}</div><div class="actions">${btns}<button onclick="tsDismissed=true;renderBanners()" title="Скрыть до перезапуска лаунчера">✕</button></div></div>`;
 }
+const FW_TEXT = 'Брандмауэр Windows закрыл порт удалённого доступа — агенты с других компьютеров не смогут управлять лаунчером. Так бывает после обновления, если закрыть запрос Windows о доступе к сети.';
+function firewallBanner(fw) {
+  if (!fw || fw.ok !== false || fwDismissed) return '';
+  return `<div class="banner caution"><div class="text">${FW_TEXT}</div><div class="actions"><button class="primary" onclick="fixFirewall()">Исправить (права администратора)</button><button onclick="fwDismissed=true;renderBanners()" title="Скрыть до перезапуска лаунчера">✕</button></div></div>`;
+}
+function firewallLine(fw) {
+  if (!fw) return '';
+  if (fw.ok === true) return '<span class="ok">порт открыт для Tailscale</span>';
+  if (fw.ok == null) return `<span class="muted">${fw.checking ? 'проверяю…' : esc(fw.error || 'не удалось проверить')}</span> <button type="button" onclick="checkFirewall()">Проверить</button>`;
+  const why = fw.blocks ? `есть запрет для лаунчера (${fw.blocks})` : 'нет правила для порта';
+  return `<span class="bad">закрыт: ${why}</span> <button type="button" class="primary" onclick="fixFirewall()">Исправить</button>`;
+}
+let fwDismissed = false, fwBusy = false;
+async function fixFirewall() {
+  if (fwBusy) return; fwBusy = true;
+  toast('Windows спросит разрешение администратора — подтвердите, чтобы открыть порт для Tailscale', 'ok', 8000);
+  try {
+    const r = await api('POST', '/api/remote/firewall/fix');
+    status.firewall = r.firewall; renderBanners();
+    if (r.ok) toast('Брандмауэр настроен: порт открыт только для Tailscale' + (r.removed_blocks ? `, снято запретов: ${r.removed_blocks}` : ''), 'ok', 5000);
+    else toast(r.error);
+    if ($('settings') && $('settings').open) refreshRemote();
+  } catch (e) { toast(e.message); }
+  fwBusy = false;
+}
+async function checkFirewall() {
+  try { const r = await api('POST', '/api/remote/firewall/check'); status.firewall = r.firewall; renderBanners(); refreshRemote(); } catch (e) { toast(e.message); }
+}
 async function tsAction(what) {
   try {
     const r = await api('POST', `/api/tailscale/${what}`);
@@ -429,6 +457,7 @@ function renderBanners() {
   let b = '';
   if (s._connError) b += `<div class="banner alarm"><div class="text">Нет связи с лаунчером: ${esc(s._connError)}. Данные на экране могут быть устаревшими.</div></div>`;
   b += tailscaleBanner(s.tailscale || {});
+  b += firewallBanner(s.firewall);
   if (e.version && !e.installed) {
     const ins = e.installer || {};
     if (ins.status === 'downloading') {
@@ -588,6 +617,7 @@ function renderRemote(r) {
   $('r_body').innerHTML = `
     ${r.error ? `<div class="alert alarm small">${esc(r.error)}</div>` : ''}
     <label>Состояние</label><div class="small">${r.running ? `<span class="ok">работает на порту ${r.port}</span>` : '<span class="bad">не запущен</span>'}</div>
+    ${r.firewall ? `<label>Брандмауэр Windows</label><div class="small">${firewallLine(r.firewall)}</div>` : ''}
     <label>Адрес для агентов</label>
     ${r.urls.length ? r.urls.map(u => `<div class="copyrow"><div class="code">${esc(u)}</div><button type="button" onclick="copyText('${esc(u)}')">Копировать</button></div>`).join('')
       : '<div class="small bad">Tailscale на этом компьютере не найден или не подключён. Установи и войди в тот же аккаунт, что и на VPS.</div>'}
@@ -608,7 +638,12 @@ async function openSettings() {
   const st = await api('GET', '/api/settings');
   $('s_monitor').value = st.monitor_interval_min;
   remoteShowToken = false; refreshRemote();
-  $('r_enabled').onchange = async () => { try { renderRemote(await api('POST', '/api/remote', {enabled: $('r_enabled').checked})); } catch (e) { toast(e.message); } };
+  $('r_enabled').onchange = async () => {
+    try {
+      const r = await api('POST', '/api/remote', {enabled: $('r_enabled').checked}); renderRemote(r);
+      if (r.enabled && r.firewall && r.firewall.ok === false) fixFirewall();  // сразу открыть порт, иначе агенты не дойдут
+    } catch (e) { toast(e.message); }
+  };
   $('s_autostart').onchange = async () => { try { renderRemote(await api('POST', '/api/remote', {autostart: $('s_autostart').checked})); toast($('s_autostart').checked ? 'XLauncher будет запускаться вместе с Windows' : 'Автозапуск выключен', 'ok', 3000); } catch (e) { toast(e.message); $('s_autostart').checked = !$('s_autostart').checked; } };
   const e = status.engine || {};
   $('s_info').innerHTML = `<dt>Компьютер</dt><dd>${esc(status.host || '')}</dd><dt>Папка</dt><dd>${esc(status.root)}</dd><dt>Версия</dt><dd class="num">${esc(status.version)}</dd>
