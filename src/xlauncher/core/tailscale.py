@@ -86,23 +86,49 @@ def _parse(d: dict) -> dict:
     return {"state": "offline", **base, "error": backend or None}
 
 
-def status() -> dict:
+def raw_status() -> dict:
+    """Сырой `tailscale status --json`; исключение — если Tailscale нет или он не отвечает."""
     exe = find_exe()
     if not exe:
+        raise FileNotFoundError("Tailscale не установлен")
+    flags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
+    r = subprocess.run([str(exe), "status", "--json"], capture_output=True, timeout=TIMEOUT_S, creationflags=flags)
+    return json.loads(r.stdout.decode("utf-8", "replace") or "{}")
+
+
+def status() -> dict:
+    if not find_exe():
         return {"state": "missing"}
     if _service_running() is False:
         return {"state": "stopped"}
-    flags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
     try:
-        r = subprocess.run([str(exe), "status", "--json"], capture_output=True, timeout=TIMEOUT_S,
-                           creationflags=flags)
-        d = json.loads(r.stdout.decode("utf-8", "replace") or "{}")
+        d = raw_status()
     except subprocess.TimeoutExpired:
         return {"state": "offline", "error": "tailscale не ответил за 5 с"}
     except (OSError, ValueError) as e:
         # служба не отвечает: CLI пишет ошибку вместо JSON
         return {"state": "stopped", "error": str(e)[:200]}
     return _parse(d)
+
+
+def network() -> dict:
+    """Сеть Tailscale этой машины: id сети, свой пользователь и соседние машины (для переезда).
+
+    {"tailnet": StableID, "user": UserID, "self_ips": [...], "peers": [{"ip", "host", "os", "online", "user"}]}"""
+    d = raw_status()
+    if d.get("BackendState") != "Running":
+        raise OSError("Tailscale не в сети")
+    tn = d.get("CurrentTailnet") or {}
+    me = d.get("Self") or {}
+    v4 = lambda ips: [ip for ip in ips or [] if ":" not in ip]  # noqa: E731
+    peers = []
+    for p in (d.get("Peer") or {}).values():
+        ips = v4(p.get("TailscaleIPs"))
+        if ips:
+            peers.append({"ip": ips[0], "ips": p.get("TailscaleIPs") or [], "host": p.get("HostName"),
+                          "os": (p.get("OS") or "").lower(), "online": bool(p.get("Online")), "user": p.get("UserID")})
+    return {"tailnet": tn.get("StableID") or tn.get("Name") or tn.get("MagicDNSSuffix") or str(me.get("UserID") or ""),
+            "user": me.get("UserID"), "self_ips": me.get("TailscaleIPs") or [], "peers": peers}
 
 
 def refresh() -> dict:

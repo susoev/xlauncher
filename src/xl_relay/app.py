@@ -291,7 +291,8 @@ def create_app() -> FastAPI:
         f = g / f"{_dev(dev)}.json"
         if not f.exists() and len(list(g.glob("*.json"))) >= DEVICES_MAX:
             raise HTTPException(429, "слишком много машин в связке")
-        _write_json(f, {"dev": dev, "seen": time.time(), "data": data})
+        _write_json(f, {"dev": dev, "seen": time.time(), "ip": request.client.host if request.client else None,
+                        "data": data})
         return {"ok": True}
 
     @app.get("/v1/groups/{gid}/devices")
@@ -321,7 +322,9 @@ def create_app() -> FastAPI:
         if len(list(box.glob("*.json"))) >= INBOX_MAX:
             raise HTTPException(429, "почтовый ящик переполнен")
         mid = f"{time.time_ns():020d}{secrets.token_hex(4)}"
-        _write_json(box / f"{mid}.json", {"id": mid, "time": time.time(), "data": data})
+        # адрес отправителя в tailnet — его подделать нельзя: получатель сверяет его со своим списком машин Tailscale
+        _write_json(box / f"{mid}.json", {"id": mid, "time": time.time(),
+                                          "from_ip": request.client.host if request.client else None, "data": data})
         return {"ok": True, "id": mid}
 
     @app.get("/v1/groups/{gid}/inbox/{dev}")

@@ -1,8 +1,9 @@
 """«Забрать сюда»: машина B забирает все профили с машины A той же связки без человека у A.
 
-Связка — машины с одинаковым кодом связки XLP-…@<релей> (вводится один раз на каждой машине).
-Из кода выводятся group_id (папка связки на релее) и ключ AES-256-GCM: все сообщения и heartbeat'ы
-зашифрованы им, релей видит только шифротекст, а член tailnet без кода ничего не попросит и не прочтёт.
+Связка — все Windows-машины пользователя в одной сети Tailscale; ничего вводить не нужно.
+Релей находится сам (опрос соседних машин tailnet на порту релея). Из id сети выводятся group_id и ключ
+AES-256-GCM сообщений; запрос «забрать» машина A выполняет, только если релей видел его с адреса
+Windows-машины того же пользователя Tailscale (A сверяет по своему `tailscale status`).
 
 Ход дела:
   B → A  pull {req, from, from_name, pub}         B создал пару X25519 и ждёт
@@ -65,12 +66,20 @@ def parse_pair_code(text: str) -> tuple[bytes, str]:
 
 
 class Pair:
-    def __init__(self, code: str) -> None:
+    """Связка. Обычно автоматическая — все машины одной сети Tailscale (auto=True): секрет выводится из id сети,
+    а запрос «забрать» принимается только с Windows-машины того же пользователя Tailscale (адрес отправителя
+    фиксирует релей). Явный код связки XLP-… — для особых случаев (разные сети, без проверки по Tailscale)."""
+
+    def __init__(self, code: str | None = None, *, secret: bytes | None = None, relay: str | None = None,
+                 auto: bool = False) -> None:
         from cryptography.hazmat.primitives import hashes
         from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 
-        secret, self.relay = parse_pair_code(code)
-        self.code = code
+        if code is not None:
+            secret, relay = parse_pair_code(code)
+        if secret is None or relay is None:
+            raise ValueError("нужен код связки или секрет и релей")
+        self.code, self.relay, self.auto = code, move.normalize_relay(relay), auto
 
         def kdf(info: str, n: int) -> bytes:
             return HKDF(algorithm=hashes.SHA256(), length=n, salt=None, info=info.encode()).derive(secret)
@@ -110,14 +119,55 @@ def device_id() -> str:
     return m["device_id"]
 
 
-def pair() -> Pair | None:
+_net_cache: dict = {}
+
+
+def network(max_age: float = 60) -> dict | None:
+    """tailscale.network() с кешем: цикл связки опрашивает релей каждые несколько секунд."""
+    from . import tailscale
+
+    if _net_cache.get("at", 0) > time.time() - max_age:
+        return _net_cache.get("net")
+    try:
+        net = tailscale.network()
+    except Exception:  # noqa: BLE001
+        net = None
+    _net_cache.update(at=time.time(), net=net)
+    return net
+
+
+def auto_secret(tailnet: str) -> bytes:
+    import hashlib
+
+    return hashlib.sha256(b"xl-pair auto v1|" + tailnet.encode()).digest()
+
+
+def pair(discover: bool = True) -> Pair | None:
+    """discover=False — не искать релей по сети (для частых опросов из интерфейса)."""
     code = _move_settings().get("pair")
-    if not code:
+    if code:
+        try:
+            return Pair(code)
+        except move.MoveError:
+            return None
+    net = network()
+    if not net or not net.get("tailnet"):
         return None
     try:
-        return Pair(code)
+        relay = move.relay_auto() if discover else move.relay_setting()
     except move.MoveError:
         return None
+    if not relay:
+        return None
+    return Pair(secret=auto_secret(net["tailnet"]), relay=relay, auto=True)
+
+
+def trusted_sender(ip: str | None) -> bool:
+    """Запрос «забрать» — только с Windows-машины того же пользователя Tailscale, что и эта."""
+    net = network(max_age=10)
+    if not ip or not net:
+        return False
+    return any(ip in p["ips"] and p["os"] == "windows" and p["user"] == net["user"] for p in net["peers"])
 
 
 def set_pair(code: str) -> dict:
@@ -235,7 +285,9 @@ def devices() -> dict:
     """Машины связки (кроме этой) — для списка «Забрать сюда»."""
     p = pair()
     if not p:
-        return {"paired": False, "devices": []}
+        reason = ("Tailscale на этом компьютере не в сети — включите его" if not network(max_age=0)
+                  else "Сервер переезда не найден в вашей сети Tailscale")
+        return {"paired": False, "devices": [], "error": reason}
     me = device_id()
     cl = _client(p, timeout=10)
     try:
@@ -250,6 +302,8 @@ def devices() -> dict:
         info = p.open(f"device/{dev}", d.get("data") or {})
         if not info or dev == me:
             continue
+        if p.auto and d.get("ip") and not trusted_sender(d.get("ip")):
+            continue  # не Windows-машина владельца — забирать с неё нельзя
         ago = max(0, now - float(d.get("seen") or 0))
         out.append({"id": dev, "name": info.get("name"), "profiles": info.get("profiles"),
                     "version": info.get("version"), "busy": info.get("busy"), "seen_ago": round(ago),
@@ -446,6 +500,10 @@ def _on_a_message(p: Pair, msg: dict) -> None:
         if msg.get("req") in _handled:
             return
         _handled.add(str(msg.get("req")))
+        if p.auto and not trusted_sender(msg.get("_from_ip")):
+            log.warning("«Забрать сюда»: запрос с %s отклонён — это не Windows-машина вашего Tailscale",
+                        msg.get("_from_ip"))
+            return
         st = move.load_state()
         if st and (st.get("pull") or {}).get("req") == msg.get("req"):
             return  # повтор
@@ -522,6 +580,7 @@ class Worker:
             msg = p.open(f"inbox/{me}", m.get("data") or {})
             if not msg:
                 continue
+            msg["_from_ip"] = m.get("from_ip")
             try:
                 if msg.get("type") in ("pull", "cancel", "done"):
                     _on_a_message(p, msg)
@@ -535,11 +594,19 @@ class Worker:
             _check_a_moved()
 
     def _run(self) -> None:
+        fails = 0
         while True:
             try:
                 self.tick()
+                fails = 0
             except Exception as e:  # noqa: BLE001
                 log.debug("связка: %s", e)
+                fails += 1
+                if fails % 20 == 5 and not _move_settings().get("pair"):
+                    try:  # релей переехал или сменил адрес — поискать заново
+                        move.relay_auto(refresh=True)
+                    except Exception:  # noqa: BLE001
+                        pass
             st = load_pull()
             active = (st and st.get("phase") not in ("done", "error", "cancelled")) or move.load_state() is not None
             self._wake.wait(POLL_ACTIVE_S if active else POLL_IDLE_S)

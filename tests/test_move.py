@@ -285,7 +285,7 @@ def test_api_export_key_and_frozen_status(relay, monkeypatch):
     addr, _ = relay
     _profile("Шесть")
     c = TestClient(create_app(None))
-    assert c.post("/api/move/export").json()["error"] == "укажите адрес сервера переезда"
+    assert "Tailscale" in c.post("/api/move/export").json()["error"]
     assert c.post("/api/move/relay", json={"relay": "нет такого"}).status_code == 400
     assert c.post("/api/move/relay", json={"relay": addr}).json()["relay"] == addr
     assert c.get("/api/move/estimate").json()["profiles"] == 1

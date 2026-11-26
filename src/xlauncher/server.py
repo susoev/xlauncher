@@ -32,6 +32,13 @@ def create_app(updater: "Updater | None") -> FastAPI:
     async def bad_request(_: Request, e: ValueError):
         return JSONResponse({"error": str(e)}, status_code=400)
 
+    @app.exception_handler(Exception)
+    async def unexpected(request: Request, e: Exception):
+        import logging
+
+        logging.getLogger("xlauncher.api").exception("ошибка %s %s", request.method, request.url.path)
+        return JSONResponse({"error": f"внутренняя ошибка: {type(e).__name__}: {e}"[:300]}, status_code=500)
+
     from .core import move
 
     @app.exception_handler(move.MoveError)
@@ -205,7 +212,7 @@ def create_app(updater: "Updater | None") -> FastAPI:
         from .core import pull
 
         return {"job": move.job.snapshot(), "export": move.export_summary(), "relay": move.relay_setting(),
-                "pull": pull.pull_public(), "paired": bool(pull.pair()),
+                "pull": pull.pull_public(), "paired": bool(pull.pair(discover=False)),
                 "pending_confirms": len(move.pending_imports()), "tailscale": tailscale.current()}
 
     @app.get("/api/move/estimate")
@@ -216,6 +223,9 @@ def create_app(updater: "Updater | None") -> FastAPI:
 
     @app.post("/api/move/relay")
     def move_relay(body: dict = Body(...)) -> dict:
+        if body.get("discover"):
+            relay = move.relay_auto(refresh=True)
+            return {"relay": relay, **move.check_relay(relay)}
         return move.set_relay(str(body.get("relay") or ""))
 
     @app.post("/api/move/stop-all")
@@ -231,10 +241,7 @@ def create_app(updater: "Updater | None") -> FastAPI:
 
     @app.post("/api/move/export")
     def move_export() -> dict:
-        relay = move.relay_setting()
-        if not relay:
-            raise move.MoveError("укажите адрес сервера переезда")
-        return move.job.start("export", move.export, relay)
+        return move.job.start("export", move.export, move.relay_auto())
 
     @app.post("/api/move/export/resume")
     def move_export_resume() -> dict:

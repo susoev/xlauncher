@@ -1078,6 +1078,60 @@ def relay_setting() -> str:
     return str((settings.load().get("move") or {}).get("relay") or "")
 
 
+RELAY_PORT = 47120
+PROBE_TIMEOUT = 2.0
+
+
+def discover_relay() -> str | None:
+    """Найти сервер переезда в своей сети Tailscale: опросить соседние машины на порту релея.
+
+    Адреса в коде нет: релей стоит на одной из машин пользователя и отвечает только внутри tailnet."""
+    import httpx
+
+    from . import tailscale
+
+    try:
+        net = tailscale.network()
+    except Exception as e:  # noqa: BLE001
+        raise MoveError(f"Tailscale не в сети — без него сервер переезда не найти ({e})") from None
+    found: list[str] = []
+
+    def probe(ip: str) -> None:
+        try:
+            r = httpx.get(f"http://{ip}:{RELAY_PORT}/v1/health", timeout=PROBE_TIMEOUT, trust_env=False)
+            if r.status_code == 200 and r.json().get("ok") and r.json().get("version"):
+                found.append(ip)
+        except Exception:  # noqa: BLE001
+            pass
+
+    threads = [threading.Thread(target=probe, args=(p["ip"],), daemon=True)
+               for p in net["peers"] if p["online"]]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(PROBE_TIMEOUT + 1)
+    if not found:
+        return None
+    return f"{sorted(found)[0]}:{RELAY_PORT}"
+
+
+def relay_auto(refresh: bool = False) -> str:
+    """Адрес релея: сохранённый или найденный в tailnet (и сохранённый)."""
+    cur = relay_setting()
+    if cur and not refresh:
+        return cur
+    found = discover_relay()
+    if not found:
+        if cur:
+            return cur
+        raise MoveError("сервер переезда не найден в вашей сети Tailscale")
+    if found != cur:
+        m = settings.load().get("move") or {}
+        settings.save({"move": {**m, "relay": found}})
+        log.info("сервер переезда найден: %s", found)
+    return found
+
+
 def set_relay(relay: str) -> dict:
     relay = normalize_relay(relay)
     cl = Relay(relay, timeout=10)

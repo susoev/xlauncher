@@ -135,6 +135,23 @@ def _run_elevated(script_file: Path) -> int:
 
 
 def fix(port: int) -> dict:
+    try:
+        return _fix(port)
+    except Exception as e:  # noqa: BLE001
+        log.exception("брандмауэр: исправление")
+        return {"ok": False, "error": f"не удалось настроить брандмауэр: {type(e).__name__}: {e}"[:300],
+                "firewall": current()}
+
+
+def _read_result(result: Path) -> str:
+    """Файл результата пишет PowerShell от администратора: пока он открыт, Windows не даёт его читать."""
+    try:
+        return result.read_text(encoding="utf-8-sig", errors="replace").strip()
+    except OSError:
+        return ""
+
+
+def _fix(port: int) -> dict:
     if not supported():
         return {"ok": True, "firewall": {"supported": False, "ok": True}}
     tmp = Path(tempfile.mkdtemp(prefix="xl-fw-"))
@@ -150,15 +167,25 @@ def fix(port: int) -> dict:
     text = ""
     while time.time() < deadline:
         if result.exists():
-            time.sleep(0.2)
-            text = result.read_text(encoding="utf-8-sig", errors="replace").strip()
+            time.sleep(0.3)
+            text = _read_result(result)
             if text:
                 break
         time.sleep(0.5)
     fw = check(port)
     if text.startswith("ok"):
         log.info("брандмауэр: правило по порту %s, снято запретов: %s", port, text[3:])
-        return {"ok": True, "removed_blocks": int(text[3:] or 0), "firewall": fw}
-    err = text[6:] if text.startswith("error") else "PowerShell не ответил за 2 минуты"
+        n = text[3:].strip()
+        return {"ok": True, "removed_blocks": int(n) if n.isdigit() else 0, "firewall": fw}
+    err = text[6:] if text.startswith("error") else (
+        "окно PowerShell от администратора не ответило за 2 минуты — возможно, запрос прав был отклонён")
     log.warning("брандмауэр: %s", err)
     return {"ok": False, "error": err, "firewall": fw}
+
+
+def selftest_fix(port: int = 47111) -> dict:
+    """Только для CI (раннер уже администратор): скрипт исправления без UAC, затем проверка."""
+    tmp = Path(tempfile.mkdtemp(prefix="xl-fw-"))
+    result = tmp / "result.txt"
+    _powershell(fix_script(app_root(), port, result), timeout=120)
+    return {"result": _read_result(result), "check": check(port)}

@@ -209,8 +209,8 @@ textarea#mv_key { min-height:64px; font:13px Consolas, "Cascadia Mono", monospac
 <dialog id="move" style="width:min(640px, 94vw)"><div class="dlg">
   <h3>Переезд на другой компьютер</h3>
   <div class="filters mvtabs" role="group" aria-label="Режим">
-    <button data-mv="send" aria-pressed="true" onclick="mvTab('send')">Отправить отсюда</button>
-    <button data-mv="pull" aria-pressed="false" onclick="mvTab('pull')">Забрать сюда</button>
+    <button data-mv="pull" aria-pressed="true" onclick="mvTab('pull')">Забрать сюда</button>
+    <button data-mv="send" aria-pressed="false" onclick="mvTab('send')" id="mv_tab_send">Отправить по ключу</button>
     <button data-mv="recv" aria-pressed="false" onclick="mvTab('recv')">Принять по ключу</button>
   </div>
   <div id="mv_body"></div>
@@ -295,7 +295,7 @@ function renderList() {
   $('c_run').textContent = profiles.filter(p => view(p).active).length || '';
   $('c_alarm').textContent = profiles.filter(p => view(p).alarm).length || '';
   const shown = profiles.filter(matches);
-  if (!profiles.length) { setHTML($('rows'), '<div class="empty">Профилей пока нет.<br><br><button class="primary" onclick="openForm()">Создать первый профиль</button><br><br><button onclick="openMove().then(() => mvTab(\'recv\'))">Принять с другого компьютера</button></div>'); return; }
+  if (!profiles.length) { setHTML($('rows'), '<div class="empty">Профилей пока нет.<br><br><button class="primary" onclick="openForm()">Создать первый профиль</button><br><br><button onclick="openMove()">Забрать профили с другого компьютера</button></div>'); return; }
   if (!shown.length) { setHTML($('rows'), '<div class="empty">Ничего не найдено. Измени запрос или фильтр.</div>'); return; }
   const groups = {};
   for (const p of shown) (groups[p.group || 'Без клиента'] ||= []).push(p);
@@ -480,8 +480,8 @@ function mvTab(t) {
 async function openMove() {
   mvShownKey = ''; $('move').showModal();
   const st = await api('GET', '/api/move/status').catch(() => null);
-  mvTab(st && st.pull && !['done', 'error', 'cancelled'].includes(st.pull.phase) || (st && st.pull && st.pull.phase === 'done') ? 'pull'
-        : st && st.job && st.job.running && st.job.kind === 'import' ? 'recv' : 'send');
+  $('mv_tab_send').style.display = profiles.length || (st && st.export) ? '' : 'none';  // отправлять нечего
+  mvTab(st && st.export ? 'send' : st && st.job && st.job.running && st.job.kind === 'import' && !st.pull ? 'recv' : 'pull');
   clearInterval(mvTimer); mvTimer = setInterval(() => { if ($('move').open) renderMove(); else clearInterval(mvTimer); }, 700);
 }
 function mvProgress(j) {
@@ -536,11 +536,12 @@ async function renderMove() {
   const tsOk = ts.state === 'running', relayOk = !!st.relay;
   const ready = tsOk && relayOk && !run.length && est.profiles > 0;
   const row = (ok, text, extra = '') => `<li><b class="${ok ? 'ok' : 'bad'}">${ok ? '✓' : '✗'}</b><span>${text}</span>${extra}</li>`;
-  const relayInput = document.activeElement && document.activeElement.id === 'mv_relay' ? document.activeElement.value : (st.relay || '');
   if (document.activeElement && document.activeElement.id === 'mv_relay') return;  // не мешаем вводу адреса
+  if (!st.relay && !renderMove._disc) { renderMove._disc = true; api('POST', '/api/move/relay', {discover: true}).then(() => renderMove()).catch(() => {}); }
   setHTML($('mv_body'), `<ul class="mvchecks">
       ${row(tsOk, tsOk ? `Tailscale в сети${ts.host ? ' (' + esc(ts.host) + ')' : ''}` : 'Tailscale не в сети — без него сервер переезда недоступен')}
-      ${row(relayOk, 'Сервер переезда', `<span class="inline" style="flex:1; min-width:240px"><input id="mv_relay" value="${esc(relayInput)}" placeholder="100.x.x.x:47120" spellcheck="false"><button type="button" onclick="mvSaveRelay()">Проверить</button></span>`)}
+      ${row(relayOk, relayOk ? 'Сервер переезда найден' : 'Сервер переезда не найден в сети Tailscale',
+            relayOk ? '' : `<button type="button" onclick="mvDiscover(this)">Найти снова</button>`)}
       ${row(!run.length, run.length ? `Запущены профили: ${esc(run.slice(0, 3).join(', '))}${run.length > 3 ? '…' : ''}` : 'Все профили остановлены',
             run.length ? `<button type="button" onclick="mvStopAll(this)">Остановить все</button>` : '')}
     </ul>
@@ -587,24 +588,27 @@ async function renderPull(st, j) {
     setHTML($('mv_body'), `<div style="margin-top:10px">${body}</div><div class="hint">Профили на том компьютере закрываются и замораживаются; он очистится только после того, как здесь всё будет проверено.</div>`);
     return mvButtons(pl.phase === 'receiving' ? '<span class="spacer"></span>' : `<button type="button" onclick="mvPullCancel()">Отменить</button><span class="spacer"></span>`);
   }
-  if (!st.paired) {
-    if (document.activeElement && document.activeElement.id === 'mv_pair') return;
-    setHTML($('mv_body'), `<div class="small" style="margin-top:8px">Чтобы забирать профили с другого компьютера без человека рядом с ним, свяжите компьютеры одним <b>кодом связки</b>: создайте код здесь и введите его на другом компьютере (или наоборот). Делается один раз.</div>
-      <label for="mv_pair">Код связки</label><div class="inline"><input id="mv_pair" placeholder="XLP-XXXX-…@адрес:порт" spellcheck="false"><button type="button" onclick="mvPairSet()">Сохранить</button></div>
-      <div class="hint">Нет кода? <a href="#" onclick="mvPairNew(); return false">Создать новый</a> — для этого нужен адрес сервера переезда (вкладка «Отправить отсюда»).</div>`);
-    return mvButtons('<span class="spacer"></span>');
-  }
   if (!pullDevs || Date.now() - pullDevsAt > 10000) {
     pullDevsAt = Date.now(); api('GET', '/api/move/devices').then(d => { pullDevs = d; renderMove(); }).catch(e => { pullDevs = {error: e.message, devices: []}; });
+  }
+  if (pullDevs && pullDevs.paired === false) {
+    setHTML($('mv_body'), `<div class="alert alarm small" style="margin-top:8px">${esc(pullDevs.error || 'нет связи')}</div>
+      <div class="hint">Компьютеры находят друг друга сами через Tailscale: на обоих должен быть запущен Tailscale и XLauncher.</div>`);
+    return mvButtons(`<button type="button" onclick="mvDiscover(this)">Найти снова</button><span class="spacer"></span>`);
   }
   const devs = (pullDevs || {}).devices || [];
   const rows = devs.map(d => `<div><span><b>${esc(d.name)}</b> — ${PROF(d.profiles || 0)}, <span class="${d.online ? 'ok' : 'muted'}">${agoText(d.seen_ago)}</span>${d.busy ? ` · ${d.busy === 'moved' ? 'профили уже переданы' : 'занят переездом'}` : ''}</span>
       <button type="button" class="primary" style="margin-left:auto" ${d.online && d.can_pull && !d.busy && d.profiles ? '' : 'disabled'} onclick="mvPull('${esc(d.id)}', '${esc(d.name)}', ${d.profiles || 0})">Забрать сюда</button></div>`).join('');
-  setHTML($('mv_body'), `<div class="small" style="margin-top:8px">Компьютеры связки:</div>
-    <div class="mvlist">${pullDevs ? (pullDevs.error ? `<span class="bad">${esc(pullDevs.error)}</span>` : rows || '<span class="muted">Других компьютеров пока нет — введите этот же код связки на другом компьютере.</span>') : 'Загружаю…'}</div>
+  setHTML($('mv_body'), `<div class="small" style="margin-top:8px">Ваши компьютеры в сети Tailscale:</div>
+    <div class="mvlist">${pullDevs ? (pullDevs.error ? `<span class="bad">${esc(pullDevs.error)}</span>` : rows || '<span class="muted">Других компьютеров пока не видно. На них должен быть запущен XLauncher (версия с переездом) и Tailscale; появятся в течение минуты.</span>') : 'Ищу компьютеры…'}</div>
     <div class="hint">Профили того компьютера закроются и переедут сюда. Профили этого компьютера уйдут в папку backups (не удаляются). Тот компьютер очистится сам после проверки всех файлов здесь.</div>
-    <div class="hint" style="margin-top:10px"><a href="#" onclick="mvPairShow(); return false">Показать код связки</a> · <a href="#" onclick="mvPairClear(); return false">Отвязать этот компьютер</a></div>`);
+`);
   mvButtons('<span class="spacer"></span>');
+}
+async function mvDiscover(btn) {
+  if (btn) { btn.disabled = true; btn.textContent = 'Ищу…'; }
+  try { await api('POST', '/api/move/relay', {discover: true}); toast('Сервер переезда найден', 'ok', 3000); } catch (e) { toast(e.message); }
+  pullDevs = null; renderMove._est = null; $('mv_body')._html = null; renderMove();
 }
 async function mvPairSet() { try { await api('POST', '/api/move/pair', {code: $('mv_pair').value}); $('mv_pair').blur(); pullDevs = null; toast('Компьютер в связке', 'ok', 3000); renderMove(); } catch (e) { toast(e.message); } }
 async function mvPairNew() {

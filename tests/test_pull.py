@@ -148,3 +148,72 @@ def test_old_request_ignored_and_foreign_messages_dropped(relay, monkeypatch, xl
     cl.close()
     pull.Worker().tick()
     assert not move.job.running and not move.load_state()
+
+
+def _net(os_name="windows", user=7):
+    return {"tailnet": "T-net-1", "user": 7, "self_ips": ["100.64.0.2"],
+            "peers": [{"ip": "127.0.0.1", "ips": ["127.0.0.1"], "host": "peer", "os": os_name, "online": True,
+                       "user": user}]}
+
+
+def test_relay_found_in_tailnet(relay, monkeypatch):
+    addr, _ = relay
+    from xlauncher.core import tailscale
+
+    monkeypatch.setattr(tailscale, "network", lambda: _net("linux"))
+    monkeypatch.setattr(move, "RELAY_PORT", int(addr.split(":")[1]))
+    assert move.relay_setting() == ""
+    assert move.relay_auto() == addr and move.relay_setting() == addr  # найден и запомнен
+    monkeypatch.setattr(tailscale, "network", lambda: {**_net(), "peers": []})
+    with pytest.raises(move.MoveError, match="не найден"):
+        settings.save({"move": {}})
+        move.relay_auto()
+
+
+@pytest.mark.parametrize("os_name, user, accepted", [("windows", 7, True), ("linux", 7, False), ("windows", 8, False)])
+def test_auto_pair_accepts_only_own_windows_machines(relay, tmp_path, monkeypatch, xl_root, os_name, user, accepted):
+    addr, _ = relay
+    from xlauncher.core import tailscale
+
+    monkeypatch.setattr(pull.worker, "wake", lambda: None)
+    monkeypatch.setattr(pull, "_net_cache", {})
+    monkeypatch.setattr(tailscale, "network", lambda: _net(os_name, user))
+    monkeypatch.setattr(move, "RELAY_PORT", int(addr.split(":")[1]))
+    profiles.create("Дом")
+    wa = pull.Worker()
+    wa.tick()  # A: релей найден сам, heartbeat без всякого кода
+    assert pull.pair().auto and settings.load()["move"]["relay"] == addr
+    _root(monkeypatch, tmp_path / "b")
+    devs = pull.devices()["devices"]
+    if not accepted:
+        assert devs == []  # чужую/не-Windows машину даже не показываем
+        return
+    assert [d["profiles"] for d in devs] == [1]
+    pull.start_pull(devs[0]["id"])
+    _root(monkeypatch, xl_root)
+    wa.tick()
+    assert _wait_job()["stage"] == "done"
+    assert move.load_state()["pull"]
+
+
+def test_auto_pair_rejects_request_from_foreign_ip(relay, tmp_path, monkeypatch, xl_root):
+    addr, _ = relay
+    from xlauncher.core import tailscale
+
+    monkeypatch.setattr(pull.worker, "wake", lambda: None)
+    monkeypatch.setattr(pull, "_net_cache", {})
+    monkeypatch.setattr(move, "RELAY_PORT", int(addr.split(":")[1]))
+    monkeypatch.setattr(tailscale, "network", lambda: _net("windows", 7))
+    profiles.create("Дом")
+    wa = pull.Worker()
+    wa.tick()
+    me = pull.device_id()
+    # запрос пришёл через релей с адреса, которого нет среди Windows-машин владельца
+    monkeypatch.setattr(pull, "_net_cache", {})
+    monkeypatch.setattr(tailscale, "network", lambda: _net("linux", 7))
+    p = pull.pair()
+    priv, pub = pull.keypair()
+    pull.send(p, me, {"type": "pull", "req": "evil", "from": "0" * 32, "from_name": "vps", "pub": pub,
+                      "time": time.time()})
+    wa.tick()
+    assert not move.job.running and not move.load_state()

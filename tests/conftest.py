@@ -13,6 +13,7 @@ def xl_root(tmp_path, monkeypatch):
     monkeypatch.setenv("XL_ROOT", str(root))
     for k in ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy"):
         monkeypatch.delenv(k, raising=False)
+    monkeypatch.setenv("XL_TAILSCALE_EXE", str(tmp_path / "нет-tailscale.exe"))  # не трогать настоящую сеть
     monkeypatch.setenv("NO_PROXY", "")
     monkeypatch.setenv("no_proxy", "")
     from xlauncher import paths
