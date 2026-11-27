@@ -142,6 +142,22 @@ def selftest() -> int:
         with winreg.OpenKey(winreg.HKEY_CURRENT_USER, policies.KEY) as k:
             assert winreg.QueryValueEx(k, "DefaultSearchProviderName")[0] == "Google"
 
+        # ярлык с AppUserModelID пишется и читается (pywin32: shell + propsys)
+        import tempfile
+
+        import pythoncom
+
+        from . import winshell
+
+        pythoncom.CoInitialize()
+        with tempfile.TemporaryDirectory() as tmp:
+            lnk = Path(tmp) / "t.lnk"
+            winshell._write_link(winshell._new_link(), Path(sys.executable), lnk)
+            assert os.path.normcase(winshell._read_target(lnk)[1]) == os.path.normcase(sys.executable)
+        for k in ("ID", "RelaunchCommand", "RelaunchDisplayNameResource", "RelaunchIconResource"):
+            winshell._pkey(f"System.AppUserModel.{k}")
+        pythoncom.CoUninitialize()
+
         secret = b"xlauncher-selftest"
         assert portability.dpapi_unprotect(portability.dpapi_protect(secret)) == secret
     print(f"selftest OK {__version__}")
@@ -275,11 +291,19 @@ def main() -> int:
             ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("susoev.XLauncher")
         except Exception:  # noqa: BLE001
             pass
+        from . import winshell
+
+        threading.Thread(target=winshell.safe, args=(winshell.ensure_shortcuts,), name="shortcuts",
+                         daemon=True).start()
     try:
         import webview
 
         window_ref["w"] = webview.create_window("XLauncher", url, width=1040, height=700, min_size=(720, 480),
                                                 minimized=os.environ.get("XL_MINIMIZED") == "1")
+        if sys.platform == "win32":
+            from . import winshell
+
+            window_ref["w"].events.shown += lambda: winshell.safe(winshell.set_window_identity)
         webview.start(icon=icon)
     except Exception:  # noqa: BLE001
         log.exception("окно не открылось — открываю интерфейс в браузере по умолчанию")
