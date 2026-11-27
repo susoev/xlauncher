@@ -2,7 +2,8 @@
 
     python build/brand.py <exe> "<описание>" <версия>
 
-Использует resedit-cli (npm, кроссплатформенный). Подпись исходного exe при этом снимается.
+Использует resedit-cli (npm, кроссплатформенный). Подпись исходного exe при этом снимается,
+поэтому после ресурсов exe подписывается своим сертификатом (build/sign.py), если задан ключ.
 """
 
 from __future__ import annotations
@@ -26,6 +27,9 @@ def brand(exe: Path, description: str, version: str) -> None:
                     "--file-description", description, "--product-name", "XLauncher", "--company-name", "susoev",
                     "--file-version", file_version, "--product-version", file_version,
                     "--original-filename", exe.name, "--internal-name", exe.stem], check=True)
+    from sign import sign
+
+    sign(exe)
 
 
 if __name__ == "__main__":

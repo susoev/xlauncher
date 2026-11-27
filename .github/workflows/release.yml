@@ -56,10 +56,19 @@ jobs:
           CGO_ENABLED: "0"
         run: go build -trimpath -ldflags "-H windowsgui -s -w" -o ../dist/xlauncher.exe .
 
+      - name: osslsigncode для подписи
+        run: sudo apt-get install -y -q osslsigncode
+
       - name: Иконка и описание загрузчика
+        env:
+          XL_SIGN_PFX: ${{ secrets.XL_SIGN_PFX }}
+          XL_SIGN_PASS: ${{ secrets.XL_SIGN_PASS }}
         run: python build/brand.py dist/xlauncher.exe "XLauncher" "${{ steps.ver.outputs.version }}"
 
       - name: Сборка приложения
+        env:
+          XL_SIGN_PFX: ${{ secrets.XL_SIGN_PFX }}
+          XL_SIGN_PASS: ${{ secrets.XL_SIGN_PASS }}
         run: python build/build_app.py --version "${{ steps.ver.outputs.version }}" --out dist
 
       - uses: actions/upload-artifact@v4
@@ -73,6 +82,8 @@ jobs:
   smoke:
     needs: build
     runs-on: windows-latest
+    env:
+      HAS_SIGN: ${{ secrets.XL_SIGN_PFX != '' }}
     steps:
       - uses: actions/checkout@v4
 
@@ -94,6 +105,15 @@ jobs:
             $d = (Get-Item $exe).VersionInfo.FileDescription
             Write-Host "$exe -> $d"
             if (-not $d.StartsWith("XLauncher")) { Write-Error "нет описания у $exe"; exit 1 }
+          }
+          # подпись своим сертификатом: с доверенным codesign.cer — Valid
+          if ($env:HAS_SIGN -eq "true") {
+            Import-Certificate -FilePath ..\build\codesign.cer -CertStoreLocation Cert:\LocalMachine\Root | Out-Null
+            foreach ($exe in "..\dist\xlauncher.exe", "python\XLauncher.exe", "python\xlauncher-runner.exe") {
+              $sig = Get-AuthenticodeSignature $exe
+              Write-Host "$exe -> $($sig.Status) $($sig.SignerCertificate.Subject)"
+              if ($sig.Status -ne "Valid") { Write-Error "подпись $exe : $($sig.Status) $($sig.StatusMessage)"; exit 1 }
+            }
           }
           # переименованный pythonw находит встроенный Python и пакет
           $p = Start-Process python\xlauncher-runner.exe -ArgumentList '-c "import xlauncher.runner, sys; sys.exit(7)"' -Wait -PassThru

@@ -16,7 +16,7 @@ import (
 
 // Версия загрузчика. Повышать при любом изменении кода загрузчика:
 // приложение сравнивает её с манифестом релиза и подменяет xlauncher.exe.
-const bootstrapVersion = 5
+const bootstrapVersion = 6 // 6: тот же код, exe подписан своим сертификатом
 
 const repo = "susoev/xlauncher"
 

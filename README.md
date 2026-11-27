@@ -23,6 +23,20 @@
 
 Дальше обновления ставятся сами: каждый push в `main` собирается в GitHub Actions, и запущенный лаунчер в течение 15 минут скачивает новую версию и перезапускается. Если новая версия не запустилась, загрузчик откатывается на предыдущую.
 
+### Подпись
+
+Exe подписаны собственным сертификатом (`CN=susoev`, открытая часть — [`build/codesign.cer`](build/codesign.cer)). Чтобы Windows показывал издателя «susoev», один раз на каждом ПК в PowerShell **от администратора**:
+
+```powershell
+$c = "$env:TEMP\xlauncher-codesign.cer"
+Invoke-WebRequest https://raw.githubusercontent.com/susoev/xlauncher/main/build/codesign.cer -OutFile $c
+(Get-PfxCertificate $c).Thumbprint   # должно быть 0A8BFF4231F62F729EE693DF0DD9E34447F12CAE
+Import-Certificate $c -CertStoreLocation Cert:\LocalMachine\Root
+Import-Certificate $c -CertStoreLocation Cert:\LocalMachine\TrustedPublisher
+```
+
+Сертификат годится только для подписи кода (`CA:FALSE`, EKU codeSigning) — выпускать другие сертификаты или подменять сайты он не может. Без этого шага всё работает как раньше, просто издатель «неизвестный».
+
 ## Устройство папки
 
 ```
